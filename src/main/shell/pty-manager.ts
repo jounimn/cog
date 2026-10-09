@@ -79,7 +79,13 @@ export function spawnAgentPty(opts: SpawnOptions): ManagedPty {
     cols: 120,
     rows: 30,
     cwd: opts.config.cwd,
-    env: { ...process.env, ...opts.extraEnv } as Record<string, string>
+    env: { ...process.env, ...opts.extraEnv } as Record<string, string>,
+    // Windows: use the conpty.dll that node-pty bundles instead of the OS's
+    // in-box ConPTY. On Windows 10 the in-box conhost (10.0.19041.x) crashes
+    // under memory pressure (0xc0000409 in ucrtbase.dll was observed), which
+    // kills the agent's shell and with it the Claude session + MCP link. The
+    // bundled DLL is the maintained Windows Terminal build. No-op elsewhere.
+    ...(process.platform === 'win32' ? { useConptyDll: true } : {})
   })
 
   ptyProcess.onData((data: string) => {
