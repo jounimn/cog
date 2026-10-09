@@ -234,3 +234,59 @@ describe('buildCliLaunchCommands', () => {
     )).toEqual(['pi install npm:pi-mcp-adapter & pi'])
   })
 })
+
+describe('buildCliLaunchCommands — Claude session persistence', () => {
+  const SID = '7ae74d9a-3aa7-4d34-8ff0-20f3f548584e'
+
+  it('pins a fresh Claude session to the agent session id', () => {
+    expect(buildCliLaunchCommands(
+      makeConfig({ model: 'sonnet' }),
+      'C:\temp\agentorch-mcp.json',
+      'C:\temp\mcp-server.js',
+      7777,
+      'secret',
+      false,
+      { id: SID, resume: false }
+    )).toEqual([
+      `claude --mcp-config "C:\temp\agentorch-mcp.json" --model sonnet --session-id ${SID}`
+    ])
+  })
+
+  it('resumes the same Claude session after an unexpected exit', () => {
+    expect(buildCliLaunchCommands(
+      makeConfig({ autoMode: true }),
+      'C:\temp\agentorch-mcp.json',
+      'C:\temp\mcp-server.js',
+      7777,
+      'secret',
+      false,
+      { id: SID, resume: true }
+    )).toEqual([
+      `claude --mcp-config "C:\temp\agentorch-mcp.json" --dangerously-skip-permissions --resume ${SID}`
+    ])
+  })
+
+  it('rejects a session id that is not a UUID', () => {
+    expect(() => buildCliLaunchCommands(
+      makeConfig(),
+      'C:\temp\agentorch-mcp.json',
+      'C:\temp\mcp-server.js',
+      7777,
+      'secret',
+      false,
+      { id: 'abc; echo pwned', resume: false }
+    )).toThrow(/session id/)
+  })
+
+  it('ignores the session option for non-Claude CLIs', () => {
+    expect(buildCliLaunchCommands(
+      makeConfig({ cli: 'kimi' }),
+      'C:\temp\agentorch-mcp.json',
+      'C:\temp\mcp-server.js',
+      7777,
+      'secret',
+      false,
+      { id: SID, resume: true }
+    )).toEqual(['kimi --mcp-config-file "C:\temp\agentorch-mcp.json"'])
+  })
+})

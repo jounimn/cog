@@ -13,7 +13,7 @@ import { meetsThreshold } from './hub/inbox-channel'
 import { createHubServer, type HubServer } from './hub/server'
 import type { ScheduleBridge, BoardBridge, AgentBridge } from './hub/routes'
 import { spawnAgentPty, writeToPty, resizePty, killPty, type ManagedPty } from './shell/pty-manager'
-import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig } from './cli-launch'
+import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig, type ClaudeSessionLaunch } from './cli-launch'
 import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir } from './mcp/config-writer'
 import { savePreset, loadPreset, listPresets, deletePreset, setPresetsDir } from './presets/preset-manager'
 import { ProjectManager } from './project/project-manager'
@@ -51,6 +51,7 @@ import { migrateLegacyUserData } from './migration/userdata-migration'
 import type { AgentConfig, AgentTheme, RemoteSetupProgress, CommunityAgent, CommunityCategory, RespawnResult, NotificationThreshold, ProposedAgent, TeamProposal, TelegramStatus } from '../shared/types'
 import { IPC } from '../shared/types'
 import { validateRespawnRequest } from './respawn-validation'
+import { claudeSessionExists } from './claude-session'
 import { initStreamDeck, disposeStreamDeck, resolveCogsworthDir, getStreamDeckStatus, reconnectStreamDeck, buildWhisperClient } from './streamdeck'
 import { prepareLocalWhisper, isLocalWhisperReady } from './streamdeck/local-whisper-prepare'
 import { BoardStore } from './db/board-store'
@@ -1248,9 +1249,10 @@ function createWindow(): BrowserWindow {
 // Returns one or more commands to type into the shell. Array = chain them sequentially.
 function buildCliLaunchCommands(
   config: AgentConfig, mcpConfigPath: string, mcpServerPath: string,
-  hubPort: number, hubSecret: string, ensurePiAdapter = false
+  hubPort: number, hubSecret: string, ensurePiAdapter = false,
+  claudeSession?: ClaudeSessionLaunch
 ): string[] | null {
-  return buildCliLaunchCommandsForConfig(config, mcpConfigPath, mcpServerPath, hubPort, hubSecret, ensurePiAdapter)
+  return buildCliLaunchCommandsForConfig(config, mcpConfigPath, mcpServerPath, hubPort, hubSecret, ensurePiAdapter, claudeSession)
 }
 
 // Build the initial prompt injected when the CLI first becomes ready.
@@ -1447,7 +1449,15 @@ function spawnPtyAndWire(
   if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
 
   const ensurePiAdapter = config.cli === 'pi' && !piAdapterEnsured
-  const cmds = buildCliLaunchCommands(config, mcpConfigPath, mcpServerPath, h.port, h.secret, ensurePiAdapter)
+  // Resume the Claude session when a transcript for it already exists (crash
+  // reconnect, restart respawn); pin a fresh one to the id otherwise. Decided
+  // at spawn time so every spawn path (initial, reconnectAgent, roster
+  // respawn) gets the same behaviour without threading a flag through.
+  const claudeSession = config.cli === 'claude' && config.sessionId
+    ? { id: config.sessionId, resume: claudeSessionExists(config.sessionId) }
+    : undefined
+  if (claudeSession?.resume) console.log(`Agent "${config.name}": resuming Claude session ${claudeSession.id}`)
+  const cmds = buildCliLaunchCommands(config, mcpConfigPath, mcpServerPath, h.port, h.secret, ensurePiAdapter, claudeSession)
   if (ensurePiAdapter) piAdapterEnsured = true
   if (cmds) {
     let delay = 1000
@@ -1549,6 +1559,11 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
       }
     }
   }
+
+  // Claude agents get a stable session id (persisted with the roster below) so
+  // a crash reconnect / restart respawn resumes the conversation instead of
+  // starting a fresh one. Other CLIs have no equivalent flag; leave them alone.
+  if (config.cli === 'claude' && !config.sessionId) config.sessionId = randomUUID()
 
   const mcpServerPath = getMcpServerPath()
   const mcpConfigPath = prepareAgentMcpConfig(config, mcpServerPath)
@@ -2659,6 +2674,8 @@ function setupIPC(): void {
       ...newConfigInput,
       name: newName,
       id: agentId,
+      // History wipe: never carry the old Claude session into the new config.
+      sessionId: undefined,
     }
 
     try {

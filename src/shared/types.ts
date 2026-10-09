@@ -52,6 +52,9 @@ export interface AgentConfig {
   groupId?: string
   tabId?: string  // workspace tab this agent belongs to
   theme?: AgentTheme  // optional per-agent color theme
+  // Claude Code only: stable conversation id (UUID) so a crash reconnect or an
+  // app-restart respawn resumes the same session instead of starting over.
+  sessionId?: string
 }
 
 export interface AgentState extends AgentConfig {
