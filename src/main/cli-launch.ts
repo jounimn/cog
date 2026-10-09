@@ -1,4 +1,15 @@
 import type { AgentConfig } from '../shared/types'
+import { isClaudeSessionId } from './claude-session'
+
+/**
+ * Claude Code session to attach the launch to. `resume: false` pins a fresh
+ * conversation to `id` (`--session-id`); `resume: true` reopens the existing
+ * transcript (`--resume`). See claude-session.ts for why this exists.
+ */
+export interface ClaudeSessionLaunch {
+  id: string
+  resume: boolean
+}
 
 // ── Input validation for values that get spliced into shell command strings ──
 //
@@ -98,7 +109,8 @@ export function buildCliLaunchCommands(
   mcpServerPath: string,
   hubPort: number,
   hubSecret: string,
-  ensurePiAdapter = false
+  ensurePiAdapter = false,
+  claudeSession?: ClaudeSessionLaunch
 ): string[] | null {
   const cliBase = config.cli
 
@@ -126,6 +138,16 @@ export function buildCliLaunchCommands(
     const parts = [`claude --mcp-config "${mcpConfigArg}"`]
     if (safeModel) parts[0] += ` --model ${safeModel}`
     if (config.autoMode) parts[0] += ' --dangerously-skip-permissions'
+    if (claudeSession) {
+      // Session ids are spliced into the shell command: enforce the UUID shape
+      // (which is also shell-safe) rather than trusting the stored config.
+      if (!isClaudeSessionId(claudeSession.id)) {
+        throw new Error('cli-launch: Claude session id must be a lowercase UUID')
+      }
+      parts[0] += claudeSession.resume
+        ? ` --resume ${claudeSession.id}`
+        : ` --session-id ${claudeSession.id}`
+    }
     return parts
   }
 

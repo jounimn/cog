@@ -93,9 +93,15 @@ function resolveHubHost(): string {
 const HUB_HOST = resolveHubHost()
 const HUB_URL = `http://${HUB_HOST}:${HUB_PORT}`
 
+// Hub calls are loopback and normally sub-second. On an overloaded machine a
+// request can stall; without a bound the CLI's tool call hangs until its own
+// MCP timeout and the agent looks dead. Fail fast and surface a tool error.
+const HUB_FETCH_TIMEOUT_MS = 20_000
+
 async function hubFetch(path: string, opts: RequestInit = {}): Promise<any> {
   const res = await fetch(`${HUB_URL}${path}`, {
     ...opts,
+    signal: opts.signal ?? AbortSignal.timeout(HUB_FETCH_TIMEOUT_MS),
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${HUB_SECRET}`,
@@ -124,7 +130,7 @@ const server = new McpServer({
 
 // Heartbeat: ping hub every 30s so it knows this MCP server is alive
 const HEARTBEAT_INTERVAL_MS = 30_000
-setInterval(async () => {
+const heartbeatTimer = setInterval(async () => {
   try {
     await hubFetch(`/agents/${encodeURIComponent(AGENT_NAME)}/heartbeat`, {
       method: 'POST',
@@ -134,6 +140,8 @@ setInterval(async () => {
     // Hub unreachable — nothing we can do, just keep trying
   }
 }, HEARTBEAT_INTERVAL_MS)
+// Don't let the heartbeat keep this process alive once the CLI is gone.
+heartbeatTimer.unref()
 
 // Initial heartbeat on startup
 hubFetch(`/agents/${encodeURIComponent(AGENT_NAME)}/heartbeat`, {
@@ -820,6 +828,16 @@ server.tool(
 async function main() {
   const transport = new StdioServerTransport()
   await server.connect(transport)
+  // The owning CLI is the only thing that should keep this server alive. When
+  // its stdio goes away (CLI exited, or its console host crashed), exit instead
+  // of lingering as an orphan that still heartbeats a dead agent to the hub.
+  const shutdown = () => {
+    clearInterval(heartbeatTimer)
+    process.exit(0)
+  }
+  transport.onclose = shutdown
+  process.stdin.on('end', shutdown)
+  process.stdin.on('close', shutdown)
 }
 
 main().catch((err) => {

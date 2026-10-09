@@ -6,5 +6,9 @@ files:
   - '!**/.vscode/*'
   - '!docs/*'
   - '!tests/*'
+# node-pty loads conpty.dll + OpenConsole.exe from disk next to its native
+# addon (useConptyDll); DLLs cannot be loaded from inside the asar archive.
+asarUnpack:
+  - node_modules/node-pty/**
 win:
   target: portable
