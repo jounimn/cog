@@ -13,7 +13,7 @@ import { meetsThreshold } from './hub/inbox-channel'
 import { createHubServer, type HubServer } from './hub/server'
 import type { ScheduleBridge, BoardBridge, AgentBridge } from './hub/routes'
 import { spawnAgentPty, writeToPty, resizePty, killPty, type ManagedPty } from './shell/pty-manager'
-import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig, type ClaudeSessionLaunch } from './cli-launch'
+import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig } from './cli-launch'
 import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir } from './mcp/config-writer'
 import { savePreset, loadPreset, listPresets, deletePreset, setPresetsDir } from './presets/preset-manager'
 import { ProjectManager } from './project/project-manager'
@@ -51,7 +51,7 @@ import { migrateLegacyUserData } from './migration/userdata-migration'
 import type { AgentConfig, AgentTheme, RemoteSetupProgress, CommunityAgent, CommunityCategory, RespawnResult, NotificationThreshold, ProposedAgent, TeamProposal, TelegramStatus } from '../shared/types'
 import { IPC } from '../shared/types'
 import { validateRespawnRequest } from './respawn-validation'
-import { claudeSessionExists } from './claude-session'
+import { sessionStrategyFor, sessionExists, sessionDirHasSessions, discoverSessionId, type SessionLaunch } from './agent-session'
 import { initStreamDeck, disposeStreamDeck, resolveCogsworthDir, getStreamDeckStatus, reconnectStreamDeck, buildWhisperClient } from './streamdeck'
 import { prepareLocalWhisper, isLocalWhisperReady } from './streamdeck/local-whisper-prepare'
 import { BoardStore } from './db/board-store'
@@ -1250,9 +1250,78 @@ function createWindow(): BrowserWindow {
 function buildCliLaunchCommands(
   config: AgentConfig, mcpConfigPath: string, mcpServerPath: string,
   hubPort: number, hubSecret: string, ensurePiAdapter = false,
-  claudeSession?: ClaudeSessionLaunch
+  session?: SessionLaunch
 ): string[] | null {
-  return buildCliLaunchCommandsForConfig(config, mcpConfigPath, mcpServerPath, hubPort, hubSecret, ensurePiAdapter, claudeSession)
+  return buildCliLaunchCommandsForConfig(config, mcpConfigPath, mcpServerPath, hubPort, hubSecret, ensurePiAdapter, session)
+}
+
+// ── Agent session persistence (see agent-session.ts) ────────────────────────
+
+/** Pi keeps its sessions here (per agent, under userData — survives restarts). */
+function piSessionDir(config: AgentConfig): string {
+  return path.join(app.getPath('userData'), 'sessions', 'pi', config.id)
+}
+
+/**
+ * Decide, at spawn time, whether this launch should open a fresh session or
+ * resume the agent's existing one. Resume only when Cog saw the session start
+ * AND the CLI's store doesn't contradict that (missing transcript → fresh).
+ */
+function resolveSessionLaunch(config: AgentConfig): SessionLaunch | undefined {
+  const strategy = sessionStrategyFor(config.cli)
+  if (strategy === 'directory') {
+    const dir = piSessionDir(config)
+    return { kind: 'dir', dir, resume: !!config.sessionStarted && sessionDirHasSessions(dir) }
+  }
+  if (strategy === 'none' || !config.sessionId) return undefined
+  const resume = !!config.sessionStarted && sessionExists(config.cli, config.sessionId) !== false
+  return { kind: 'id', id: config.sessionId, resume }
+}
+
+function persistAgentConfig(config: AgentConfig): void {
+  contextRegistry.resolveForSpawn(config.tabId)?.stores.roster.save(config)
+}
+
+// Discovery polls for codex/kimi — the CLI flushes its transcript some time
+// after the first prompt lands. Keyed by agent id so teardown can cancel.
+const sessionDiscoveryTimers = new Map<string, ReturnType<typeof setTimeout>[]>()
+const SESSION_DISCOVERY_DELAYS_MS = [8_000, 20_000, 45_000, 90_000, 180_000]
+
+function cancelSessionDiscovery(agentId: string): void {
+  for (const t of sessionDiscoveryTimers.get(agentId) ?? []) clearTimeout(t)
+  sessionDiscoveryTimers.delete(agentId)
+}
+
+function scheduleSessionDiscovery(config: AgentConfig, since: number): void {
+  cancelSessionDiscovery(config.id)
+  const timers = SESSION_DISCOVERY_DELAYS_MS.map(delay => setTimeout(() => {
+    if (agents.get(config.id)?.config !== config) { cancelSessionDiscovery(config.id); return }
+    const id = discoverSessionId(config.cli, config.name, { since })
+    if (!id) return
+    config.sessionId = id
+    config.sessionStarted = true
+    persistAgentConfig(config)
+    cancelSessionDiscovery(config.id)
+    console.log(`Agent "${config.name}": discovered ${config.cli} session ${id}`)
+  }, delay))
+  sessionDiscoveryTimers.set(config.id, timers)
+}
+
+/**
+ * Called once the initial prompt has been typed into the CLI: from here on a
+ * session exists under the agent's identity. Pinnable + directory strategies
+ * just flip the flag; discovered ones go find the id the CLI chose.
+ */
+function onInitialPromptInjected(config: AgentConfig): void {
+  const strategy = sessionStrategyFor(config.cli)
+  if (strategy === 'none') return
+  if (strategy === 'discovered') {
+    if (!config.sessionStarted) scheduleSessionDiscovery(config, Date.now())
+    return
+  }
+  if (config.sessionStarted) return
+  config.sessionStarted = true
+  persistAgentConfig(config)
 }
 
 // Build the initial prompt injected when the CLI first becomes ready.
@@ -1433,7 +1502,10 @@ function spawnPtyAndWire(
       if (status === 'active' && !hasReceivedInitialPrompt.has(config.id)) {
         hasReceivedInitialPrompt.add(config.id)
         const prompt = initialPrompts.get(config.id)
-        if (prompt) injectPrompt(managed, prompt, 0)
+        if (prompt) {
+          injectPrompt(managed, prompt, 0)
+          onInitialPromptInjected(config)
+        }
       }
 
       // Flush queued nudges when agent becomes active
@@ -1449,15 +1521,13 @@ function spawnPtyAndWire(
   if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
 
   const ensurePiAdapter = config.cli === 'pi' && !piAdapterEnsured
-  // Resume the Claude session when a transcript for it already exists (crash
-  // reconnect, restart respawn); pin a fresh one to the id otherwise. Decided
-  // at spawn time so every spawn path (initial, reconnectAgent, roster
-  // respawn) gets the same behaviour without threading a flag through.
-  const claudeSession = config.cli === 'claude' && config.sessionId
-    ? { id: config.sessionId, resume: claudeSessionExists(config.sessionId) }
-    : undefined
-  if (claudeSession?.resume) console.log(`Agent "${config.name}": resuming Claude session ${claudeSession.id}`)
-  const cmds = buildCliLaunchCommands(config, mcpConfigPath, mcpServerPath, h.port, h.secret, ensurePiAdapter, claudeSession)
+  // Resume the agent's session when Cog saw one start (crash reconnect,
+  // restart respawn); open a fresh one otherwise. Decided at spawn time so
+  // every spawn path (initial, reconnectAgent, roster respawn) gets the same
+  // behaviour without threading a flag through.
+  const session = resolveSessionLaunch(config)
+  if (session?.resume) console.log(`Agent "${config.name}": resuming ${config.cli} session ${session.kind === 'id' ? session.id : session.dir}`)
+  const cmds = buildCliLaunchCommands(config, mcpConfigPath, mcpServerPath, h.port, h.secret, ensurePiAdapter, session)
   if (ensurePiAdapter) piAdapterEnsured = true
   if (cmds) {
     let delay = 1000
@@ -1474,7 +1544,10 @@ function spawnPtyAndWire(
     setTimeout(() => {
       if (!hasReceivedInitialPrompt.has(config.id)) {
         hasReceivedInitialPrompt.add(config.id)
-        if (initialPrompt) injectPrompt(managed, initialPrompt, 0)
+        if (initialPrompt) {
+          injectPrompt(managed, initialPrompt, 0)
+          onInitialPromptInjected(config)
+        }
       }
     }, delay + PROMPT_INJECT_FALLBACK_MS)
   }
@@ -1563,7 +1636,7 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
   // Claude agents get a stable session id (persisted with the roster below) so
   // a crash reconnect / restart respawn resumes the conversation instead of
   // starting a fresh one. Other CLIs have no equivalent flag; leave them alone.
-  if (config.cli === 'claude' && !config.sessionId) config.sessionId = randomUUID()
+  if (sessionStrategyFor(config.cli) === 'pinnable' && !config.sessionId) config.sessionId = randomUUID()
 
   const mcpServerPath = getMcpServerPath()
   const mcpConfigPath = prepareAgentMcpConfig(config, mcpServerPath)
@@ -1727,6 +1800,7 @@ function toProposalView(p: TeamProposal): ProposalView {
 function teardownAgent(managed: ManagedPty): void {
   const { id, name } = managed.config
   manualKills.add(id) // Prevent auto-reconnect
+  cancelSessionDiscovery(id)
   killPty(managed)
   // Target the agent's OWN context (Stage 4): its registry entry + roster live
   // on that workspace's hub/DB, not whichever is active.
@@ -2527,6 +2601,7 @@ function closeCtxResources(id: string, ctx: WorkspaceCtx): void {
     if (effTab !== id) continue
     const { name } = managed.config
     manualKills.add(agentId)
+    cancelSessionDiscovery(agentId)
     killPty(managed)
     if (managed.mcpConfigPath) cleanupConfig(managed.mcpConfigPath)
     pendingNudges.delete(name)
@@ -2656,6 +2731,7 @@ function setupIPC(): void {
     // file is written would race-delete the freshly-written config and break
     // the CLI launch.
     managed.mcpConfigPath = null
+    cancelSessionDiscovery(agentId)
     killPty(managed)
 
     // Wipe history under old name
@@ -2674,8 +2750,9 @@ function setupIPC(): void {
       ...newConfigInput,
       name: newName,
       id: agentId,
-      // History wipe: never carry the old Claude session into the new config.
+      // History wipe: never carry the old session into the new config.
       sessionId: undefined,
+      sessionStarted: undefined,
     }
 
     try {

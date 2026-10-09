@@ -1,15 +1,5 @@
 import type { AgentConfig } from '../shared/types'
-import { isClaudeSessionId } from './claude-session'
-
-/**
- * Claude Code session to attach the launch to. `resume: false` pins a fresh
- * conversation to `id` (`--session-id`); `resume: true` reopens the existing
- * transcript (`--resume`). See claude-session.ts for why this exists.
- */
-export interface ClaudeSessionLaunch {
-  id: string
-  resume: boolean
-}
+import { isShellSafeSessionId, type SessionLaunch } from './agent-session'
 
 // ── Input validation for values that get spliced into shell command strings ──
 //
@@ -110,11 +100,22 @@ export function buildCliLaunchCommands(
   hubPort: number,
   hubSecret: string,
   ensurePiAdapter = false,
-  claudeSession?: ClaudeSessionLaunch
+  session?: SessionLaunch
 ): string[] | null {
   const cliBase = config.cli
 
   if (cliBase === 'terminal') return null
+
+  // Session identity (see agent-session.ts). Ids are spliced into the shell
+  // command: enforce the shell-safe charset rather than trusting stored config.
+  let sessionId: string | null = null
+  if (session?.kind === 'id') {
+    if (!isShellSafeSessionId(session.id)) {
+      throw new Error('cli-launch: session id contains unsafe characters or is the wrong length')
+    }
+    sessionId = session.id
+  }
+  const resume = !!session?.resume
 
   // Validate every value that will be interpolated into a shell command string,
   // both to stop attacker-controlled injections and to crash early with a clear
@@ -138,23 +139,16 @@ export function buildCliLaunchCommands(
     const parts = [`claude --mcp-config "${mcpConfigArg}"`]
     if (safeModel) parts[0] += ` --model ${safeModel}`
     if (config.autoMode) parts[0] += ' --dangerously-skip-permissions'
-    if (claudeSession) {
-      // Session ids are spliced into the shell command: enforce the UUID shape
-      // (which is also shell-safe) rather than trusting the stored config.
-      if (!isClaudeSessionId(claudeSession.id)) {
-        throw new Error('cli-launch: Claude session id must be a lowercase UUID')
-      }
-      parts[0] += claudeSession.resume
-        ? ` --resume ${claudeSession.id}`
-        : ` --session-id ${claudeSession.id}`
-    }
+    if (sessionId) parts[0] += resume ? ` --resume ${sessionId}` : ` --session-id ${sessionId}`
     return parts
   }
 
   if (cliBase === 'openclaude') {
+    // Community fork of Claude Code; mirrors its session flags.
     const parts = [`openclaude --mcp-config "${mcpConfigArg}"`]
     if (safeModel) parts[0] += ` --model ${safeModel}`
     if (config.autoMode) parts[0] += ' --dangerously-skip-permissions'
+    if (sessionId) parts[0] += resume ? ` --resume ${sessionId}` : ` --session-id ${sessionId}`
     return parts
   }
 
@@ -164,6 +158,13 @@ export function buildCliLaunchCommands(
       buildMcpCleanupCmd('codex', config.shell),
       `codex mcp add ${mcpName} -- node "${mcpServerArg}" ${hubPort} ${safeSecret} ${safeId} ${config.name}`,
     ]
+    // Codex cannot be told which id to use for a NEW session (Cog discovers it
+    // from ~/.codex/sessions afterwards). `codex resume <id>` restores the
+    // session's own model + approval mode, so no flags are repeated.
+    if (sessionId && resume) {
+      cmds.push(`codex resume ${sessionId}`)
+      return cmds
+    }
     let codexCmd = 'codex'
     if (safeModel) codexCmd += ` -m ${safeModel}`
     if (config.autoMode) codexCmd += ' --yolo'
@@ -179,6 +180,10 @@ export function buildCliLaunchCommands(
     // --model and let kimi load its cached choice. Users can switch the
     // model from inside kimi via the `/model` command.
     let cmd = `kimi --mcp-config-file "${mcpConfigArg}"`
+    // Kimi: `--session <id>` resumes (id discovered after the first launch).
+    // --yolo is rejected alongside --session; the session restores its own
+    // YOLO state, so it is dropped on resume.
+    if (sessionId && resume) return [`${cmd} --session ${sessionId}`]
     if (config.autoMode) cmd += ' --yolo'
     return [cmd]
   }
@@ -211,6 +216,7 @@ export function buildCliLaunchCommands(
     let geminiCmd = 'gemini'
     if (safeModel) geminiCmd += ` --model ${safeModel}`
     if (config.autoMode) geminiCmd += ' --yolo'
+    if (sessionId) geminiCmd += resume ? ` --resume ${sessionId}` : ` --session-id ${sessionId}`
     cmds.push(geminiCmd)
     return cmds
   }
@@ -219,12 +225,16 @@ export function buildCliLaunchCommands(
     let cmd = `copilot --additional-mcp-config "@${mcpConfigArg}"`
     if (safeModel) cmd += ` --model=${safeModel}`
     if (config.autoMode) cmd += ' --allow-all'
+    // Copilot's --session-id resumes an existing session or creates one with
+    // that UUID, so the same flag serves both launches.
+    if (sessionId) cmd += ` --session-id=${sessionId}`
     return [cmd]
   }
 
   if (cliBase === 'grok') {
     let cmd = 'grok'
     if (safeModel) cmd += ` --model ${safeModel}`
+    if (sessionId) cmd += resume ? ` --resume ${sessionId}` : ` --session-id ${sessionId}`
     return [cmd]
   }
 
@@ -232,15 +242,23 @@ export function buildCliLaunchCommands(
     // Pi has no permission prompts (autoMode is a no-op) and reads its model from
     // its own provider config (no --model flag). Identity reaches the hub via the
     // pi-mcp-adapter reading $PI_CODING_AGENT_DIR/mcp.json, set by the spawn site.
+    // Sessions: a per-agent `--session-dir` (outside the temp agent dir, which
+    // is wiped on exit) so `--continue` reopens THIS agent's latest session.
+    let piCmd = 'pi'
+    if (session?.kind === 'dir') {
+      const dirArg = isWsl ? toWslPath(session.dir) : session.dir
+      piCmd += ` --session-dir "${dirArg}"`
+      if (session.resume) piCmd += ' --continue'
+    }
     if (ensurePiAdapter) {
       // Combine install + launch on one PTY line so `pi` only runs after the
       // install command returns (avoids the fixed inter-command delay racing a
       // slow npm install). `;`/`&` run `pi` regardless of install success, so a
       // failed install degrades to a solo Pi rather than no agent at all.
       const sep = config.shell === 'cmd' ? ' & ' : ' ; '
-      return [`pi install npm:pi-mcp-adapter${sep}pi`]
+      return [`pi install npm:pi-mcp-adapter${sep}${piCmd}`]
     }
-    return ['pi']
+    return [piCmd]
   }
 
   return [cliBase]

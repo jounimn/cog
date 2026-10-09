@@ -235,58 +235,79 @@ describe('buildCliLaunchCommands', () => {
   })
 })
 
-describe('buildCliLaunchCommands — Claude session persistence', () => {
+describe('buildCliLaunchCommands — session persistence', () => {
   const SID = '7ae74d9a-3aa7-4d34-8ff0-20f3f548584e'
+  const MCP = 'C:\\temp\\agentorch-mcp.json'
+  const SRV = 'C:\\temp\\mcp-server.js'
+  const launch = (cfg: Partial<AgentConfig>, session?: Parameters<typeof buildCliLaunchCommands>[6]) =>
+    buildCliLaunchCommands(makeConfig(cfg), MCP, SRV, 7777, 'secret', false, session)
+  const fresh = { kind: 'id' as const, id: SID, resume: false }
+  const resume = { kind: 'id' as const, id: SID, resume: true }
 
-  it('pins a fresh Claude session to the agent session id', () => {
-    expect(buildCliLaunchCommands(
-      makeConfig({ model: 'sonnet' }),
-      'C:\temp\agentorch-mcp.json',
-      'C:\temp\mcp-server.js',
-      7777,
-      'secret',
-      false,
-      { id: SID, resume: false }
-    )).toEqual([
-      `claude --mcp-config "C:\temp\agentorch-mcp.json" --model sonnet --session-id ${SID}`
-    ])
+  it('claude: pins a fresh session, resumes an existing one', () => {
+    expect(launch({ model: 'sonnet' }, fresh)).toEqual([`claude --mcp-config "${MCP}" --model sonnet --session-id ${SID}`])
+    expect(launch({ autoMode: true }, resume)).toEqual([`claude --mcp-config "${MCP}" --dangerously-skip-permissions --resume ${SID}`])
   })
 
-  it('resumes the same Claude session after an unexpected exit', () => {
-    expect(buildCliLaunchCommands(
-      makeConfig({ autoMode: true }),
-      'C:\temp\agentorch-mcp.json',
-      'C:\temp\mcp-server.js',
-      7777,
-      'secret',
-      false,
-      { id: SID, resume: true }
-    )).toEqual([
-      `claude --mcp-config "C:\temp\agentorch-mcp.json" --dangerously-skip-permissions --resume ${SID}`
-    ])
+  it('openclaude mirrors the claude flags', () => {
+    expect(launch({ cli: 'openclaude' }, fresh)).toEqual([`openclaude --mcp-config "${MCP}" --session-id ${SID}`])
+    expect(launch({ cli: 'openclaude' }, resume)).toEqual([`openclaude --mcp-config "${MCP}" --resume ${SID}`])
   })
 
-  it('rejects a session id that is not a UUID', () => {
-    expect(() => buildCliLaunchCommands(
-      makeConfig(),
-      'C:\temp\agentorch-mcp.json',
-      'C:\temp\mcp-server.js',
-      7777,
-      'secret',
-      false,
-      { id: 'abc; echo pwned', resume: false }
-    )).toThrow(/session id/)
+  it('gemini: --session-id on fresh, --resume on reconnect, after model/yolo flags', () => {
+    expect(launch({ cli: 'gemini', model: 'gemini-2.5-pro', autoMode: true }, fresh)?.at(-1))
+      .toBe(`gemini --model gemini-2.5-pro --yolo --session-id ${SID}`)
+    expect(launch({ cli: 'gemini' }, resume)?.at(-1)).toBe(`gemini --resume ${SID}`)
   })
 
-  it('ignores the session option for non-Claude CLIs', () => {
-    expect(buildCliLaunchCommands(
-      makeConfig({ cli: 'kimi' }),
-      'C:\temp\agentorch-mcp.json',
-      'C:\temp\mcp-server.js',
-      7777,
-      'secret',
-      false,
-      { id: SID, resume: true }
-    )).toEqual(['kimi --mcp-config-file "C:\temp\agentorch-mcp.json"'])
+  it('copilot: the same --session-id= serves create and resume', () => {
+    expect(launch({ cli: 'copilot', autoMode: true }, fresh)).toEqual([`copilot --additional-mcp-config "@${MCP}" --allow-all --session-id=${SID}`])
+    expect(launch({ cli: 'copilot' }, resume)).toEqual([`copilot --additional-mcp-config "@${MCP}" --session-id=${SID}`])
+  })
+
+  it('grok: --session-id on fresh, --resume on reconnect', () => {
+    expect(launch({ cli: 'grok', model: 'grok-4' }, fresh)).toEqual([`grok --model grok-4 --session-id ${SID}`])
+    expect(launch({ cli: 'grok' }, resume)).toEqual([`grok --resume ${SID}`])
+  })
+
+  it('codex: fresh launch is unchanged (id is discovered later); resume uses `codex resume <id>` without repeating flags', () => {
+    const freshCmds = launch({ cli: 'codex', model: 'gpt-5', autoMode: true }, fresh)!
+    expect(freshCmds.at(-1)).toBe('codex -m gpt-5 --yolo')
+    const resumeCmds = launch({ cli: 'codex', model: 'gpt-5', autoMode: true }, resume)!
+    expect(resumeCmds.at(-1)).toBe(`codex resume ${SID}`)
+    // MCP registration still precedes both, so the new hub port/secret apply.
+    expect(resumeCmds.length).toBe(freshCmds.length)
+    expect(resumeCmds[1]).toContain('codex mcp add cog-worker-1')
+  })
+
+  it('kimi: fresh launch is unchanged; resume uses --session and drops --yolo (restored by the session)', () => {
+    expect(launch({ cli: 'kimi', autoMode: true }, fresh)).toEqual([`kimi --mcp-config-file "${MCP}" --yolo`])
+    expect(launch({ cli: 'kimi', autoMode: true }, resume)).toEqual([`kimi --mcp-config-file "${MCP}" --session ${SID}`])
+  })
+
+  it('pi: per-agent --session-dir, plus --continue on resume, also inside the adapter-install chain', () => {
+    const dir = 'C:\\Users\\me\\AppData\\Roaming\\The Cog\\sessions\\pi\\agent-1'
+    expect(launch({ cli: 'pi' }, { kind: 'dir', dir, resume: false })).toEqual([`pi --session-dir "${dir}"`])
+    expect(launch({ cli: 'pi' }, { kind: 'dir', dir, resume: true })).toEqual([`pi --session-dir "${dir}" --continue`])
+    expect(buildCliLaunchCommands(makeConfig({ cli: 'pi' }), MCP, SRV, 7777, 'secret', true, { kind: 'dir', dir, resume: true }))
+      .toEqual([`pi install npm:pi-mcp-adapter ; pi --session-dir "${dir}" --continue`])
+  })
+
+  it('pi under WSL translates the session dir to /mnt/<drive>', () => {
+    expect(launch({ cli: 'pi', shell: 'wsl' }, { kind: 'dir', dir: 'C:\\Users\\me\\sessions\\a', resume: true }))
+      .toEqual(['pi --session-dir "/mnt/c/Users/me/sessions/a" --continue'])
+  })
+
+  it('rejects a session id that is not shell-safe', () => {
+    expect(() => launch({}, { kind: 'id', id: 'abc; echo pwned', resume: false })).toThrow(/session id/)
+    expect(() => launch({ cli: 'codex' }, { kind: 'id', id: '$(rm -rf /)', resume: true })).toThrow(/session id/)
+  })
+
+  it('without a session every CLI launches exactly as before', () => {
+    expect(launch({ cli: 'codex', model: 'gpt-5' })?.at(-1)).toBe('codex -m gpt-5')
+    expect(launch({ cli: 'kimi' })).toEqual([`kimi --mcp-config-file "${MCP}"`])
+    expect(launch({ cli: 'pi' })).toEqual(['pi'])
+    expect(launch({ cli: 'grok' })).toEqual(['grok'])
+    expect(launch({ cli: 'copilot' })).toEqual([`copilot --additional-mcp-config "@${MCP}"`])
   })
 })
