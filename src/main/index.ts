@@ -56,7 +56,7 @@ import { initStreamDeck, disposeStreamDeck, resolveCogsworthDir, getStreamDeckSt
 import { prepareLocalWhisper, isLocalWhisperReady } from './streamdeck/local-whisper-prepare'
 import { buildInitialPrompt } from './agent-prompt'
 import { agentSlug, defaultWorktreeForRole } from '../shared/agent-worktree-defaults'
-import { ensureAgentWorktree, releaseAgentWorktree, ensureWorkDir } from './git/agent-worktree'
+import { ensureAgentWorktree, releaseAgentWorktree, ensureWorkDir, listAgentWorktrees, removeAgentWorktree } from './git/agent-worktree'
 import { BoardStore } from './db/board-store'
 import { BoardAppearanceStore } from './db/board-appearance-store'
 import { saveImageBytes, saveRenderBytes, renderPathForPage } from './board/board-files'
@@ -3524,6 +3524,33 @@ function setupIPC(): void {
     if (!root) return { error: 'No project' }
     try { gitOps.createBranch(root, name); return { status: 'ok' } }
     catch (e: any) { return { error: e.message } }
+  })
+
+  ipcMain.handle(IPC.WORKTREE_LIST, () => {
+    const root = activeWorkspaceProjectPath()
+    if (!root) return []
+    try {
+      const agents = getVisibleAgents()
+      return listAgentWorktrees(root).map(w => ({
+        ...w,
+        agentName: agents.find(a => agentSlug(a.name) === w.slug)?.name ?? null,
+      }))
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.WORKTREE_REMOVE, (_event, slug: string, force: boolean) => {
+    const root = activeWorkspaceProjectPath()
+    if (!root) return { removed: false, detail: 'No project open' }
+    try {
+      if (getVisibleAgents().some(a => agentSlug(a.name) === slug)) {
+        return { removed: false, detail: 'Agent is still running' }
+      }
+      return removeAgentWorktree(root, slug, { force: !!force })
+    } catch (e: any) {
+      return { removed: false, detail: e?.message ?? String(e) }
+    }
   })
 
   // Bug report — posts directly to GitHub Issues via API (no user login needed)

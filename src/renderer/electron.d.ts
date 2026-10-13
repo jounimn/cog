@@ -11,6 +11,8 @@ declare global {
       writeToPty: (agentId: string, data: string) => Promise<void>
       resizePty: (agentId: string, cols: number, rows: number) => Promise<void>
       getCwd: () => Promise<string>
+      worktreeList: () => Promise<Array<{ slug: string; path: string; branch: string | null; dirty: boolean; agentName: string | null }>>
+      worktreeRemove: (slug: string, force: boolean) => Promise<{ removed: boolean; detail?: string }>
       browseDirectory: (defaultPath: string) => Promise<string | null>
       savePreset: (name: string, agents: AgentConfig[], windows: unknown, canvas: unknown) => Promise<{ status: string }>
       loadPreset: (name: string) => Promise<WorkspacePreset>

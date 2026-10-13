@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import type { GitStatus, GitFileStatus, GitLogEntry } from '../../shared/types'
 
+interface WorktreeRow { slug: string; path: string; branch: string | null; dirty: boolean; agentName: string | null }
+
 declare const electronAPI: {
   gitStatus: () => Promise<GitStatus>
   gitLog: (count?: number) => Promise<GitLogEntry[]>
@@ -13,6 +15,8 @@ declare const electronAPI: {
   gitBranches: () => Promise<{ current: string; branches: string[] }>
   gitCheckout: (branch: string) => Promise<{ status?: string; error?: string }>
   gitNewBranch: (name: string) => Promise<{ status?: string; error?: string }>
+  worktreeList: () => Promise<WorktreeRow[]>
+  worktreeRemove: (slug: string, force: boolean) => Promise<{ removed: boolean; detail?: string }>
 }
 
 const STATUS_COLORS: Record<GitFileStatus['status'], string> = {
@@ -188,6 +192,45 @@ export function GitPanel(): React.ReactElement {
 
   const branchDropdownRef = useRef<HTMLDivElement>(null)
 
+  const [worktrees, setWorktrees] = useState<WorktreeRow[]>([])
+
+  const refreshWorktrees = useCallback(async () => {
+    try {
+      setWorktrees(await electronAPI.worktreeList())
+    } catch (err) {
+      setError(`Failed to list worktrees: ${err}`)
+    }
+  }, [])
+
+  const removeWorktree = useCallback(async (w: WorktreeRow) => {
+    if (w.agentName) return
+    let force = false
+    if (w.dirty) {
+      if (!window.confirm('Worktree has uncommitted changes. Remove anyway?')) return
+      force = true
+    }
+    try {
+      const r = await electronAPI.worktreeRemove(w.slug, force)
+      if (!r.removed) setError(r.detail ?? `Could not remove ${w.slug}`)
+    } catch (err) {
+      setError(`Remove failed: ${err}`)
+    }
+    await refreshWorktrees()
+  }, [refreshWorktrees])
+
+  const removeAllClean = useCallback(async () => {
+    for (const w of worktrees) {
+      if (w.dirty || w.agentName) continue
+      try {
+        const r = await electronAPI.worktreeRemove(w.slug, false)
+        if (!r.removed) setError(r.detail ?? `Could not remove ${w.slug}`)
+      } catch (err) {
+        setError(`Remove failed: ${err}`)
+      }
+    }
+    await refreshWorktrees()
+  }, [worktrees, refreshWorktrees])
+
   // ── Fetch status ──────────────────────────────────────────
   const refreshStatus = useCallback(async () => {
     try {
@@ -211,7 +254,8 @@ export function GitPanel(): React.ReactElement {
   useEffect(() => {
     refreshStatus()
     refreshLog()
-  }, [refreshStatus, refreshLog])
+    refreshWorktrees()
+  }, [refreshStatus, refreshLog, refreshWorktrees])
 
   // Close branch dropdown on outside click
   useEffect(() => {
@@ -555,10 +599,42 @@ export function GitPanel(): React.ReactElement {
           <Btn label="+ Branch" onClick={() => setShowNewBranch(true)} small />
         )}
 
-        <Btn label={'\u21BB'} onClick={() => { refreshStatus(); refreshLog() }} small />
+        <Btn label={'\u21BB'} onClick={() => { refreshStatus(); refreshLog(); refreshWorktrees() }} small />
         <Btn label="Pull" onClick={pull} small loading={loading === 'pull'} />
         <Btn label="Push" onClick={push} small loading={loading === 'push'} disabled={status.ahead === 0} />
       </div>
+
+      {/* ── Agent worktrees ──────────────────────────────── */}
+      {worktrees.length > 0 && (
+        <div style={{ borderBottom: '1px solid #333', flexShrink: 0, maxHeight: '140px', overflow: 'auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '4px 10px', gap: '6px' }}>
+            <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#888', flex: 1 }}>
+              Agent worktrees
+            </span>
+            <Btn
+              label="Remove all clean"
+              small
+              onClick={removeAllClean}
+              disabled={!worktrees.some(w => !w.dirty && !w.agentName)}
+            />
+          </div>
+          {worktrees.map(w => (
+            <div key={w.slug} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 10px', fontSize: '11px', color: '#ccc' }}>
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.path}>
+                {w.slug} {'·'} {w.branch ?? `cog/${w.slug}`} {'·'}{' '}
+                <span style={{ color: w.dirty ? '#ffc107' : '#4caf50' }}>{w.dirty ? 'dirty' : 'clean'}</span>
+                {' '}{'·'} {w.agentName ?? '—'}
+              </span>
+              <Btn
+                label="Remove"
+                small
+                disabled={!!w.agentName}
+                onClick={() => removeWorktree(w)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── View mode toggle ─────────────────────────────── */}
       <div style={{
