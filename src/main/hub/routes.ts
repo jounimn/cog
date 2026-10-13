@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import * as fs from 'fs'
 import * as path from 'path'
 import { resolveProjectPath as resolveProjectPathShared } from '../shared/project-path'
+import { resolveFileBase } from './file-base'
 import type { AgentRegistry } from './agent-registry'
 import type { MessageRouter } from './message-router'
 import type { Pinboard } from './pinboard'
@@ -545,8 +546,7 @@ export function createRoutes(
   // Relative paths resolve against the calling agent's cwd (its worktree),
   // identified by the X-Cog-Agent header; containment stays the project root.
   const resolveProjectPath = (req: Request, requestedPath: string): string | null => {
-    const agent = registry.get(String(req.header('x-cog-agent') ?? ''))
-    const base = agent?.cwd ?? projectPathRef.path ?? undefined
+    const base = resolveFileBase(n => registry.get(n), req.header('x-cog-agent'), projectPathRef.path)
     return resolveProjectPathShared(projectPathRef.path, requestedPath, base)
   }
 

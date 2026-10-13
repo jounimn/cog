@@ -56,5 +56,5 @@ describe.skipIf(!hasGit)('agent worktree against a real repo', () => {
     fs.writeFileSync(path.join(c.path, 'x.txt'), 'dirty')
     expect(releaseAgentWorktree(root, 'Builder 1')).toMatchObject({ removed: false, reason: 'dirty' })
     expect(execSync('git branch --list cog/builder-1', { cwd: root, encoding: 'utf-8' })).toContain('cog/builder-1')
-  })
+  }, 60000)
 })

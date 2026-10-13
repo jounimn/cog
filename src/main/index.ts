@@ -55,6 +55,7 @@ import { sessionStrategyFor, sessionExists, sessionDirHasSessions, discoverSessi
 import { initStreamDeck, disposeStreamDeck, resolveCogsworthDir, getStreamDeckStatus, reconnectStreamDeck, buildWhisperClient } from './streamdeck'
 import { prepareLocalWhisper, isLocalWhisperReady } from './streamdeck/local-whisper-prepare'
 import { buildInitialPrompt } from './agent-prompt'
+import { deriveProjectRoot } from './agent-root'
 import { agentSlug, defaultWorktreeForRole } from '../shared/agent-worktree-defaults'
 import { ensureAgentWorktree, releaseAgentWorktree, ensureWorkDir, listAgentWorktrees, removeAgentWorktree } from './git/agent-worktree'
 import { BoardStore } from './db/board-store'
@@ -1631,6 +1632,16 @@ function uniqueAgentName(desired: string): string {
 // workshop spawn endpoint (mobile). Preserves all side effects: MCP config,
 // hub registration, skill prompt composition, PTY lifecycle wiring, CLI
 // launch command sequencing, and workspace window updates.
+// Live PTY (any workspace) running as the agent that owns <projectRoot>/.cog/*/<slug>.
+function liveAgentForSlug(projectRoot: string, slug: string): ManagedPty | undefined {
+  const norm = (p: string): string => path.resolve(p).toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '')
+  const target = norm(projectRoot)
+  for (const managed of agents.values()) {
+    if (norm(managed.projectRoot) === target && agentSlug(managed.config.name) === slug) return managed
+  }
+  return undefined
+}
+
 function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): { id: string; mcpConfigPath: string } {
   // P2: an agent runs in its workspace's bound folder, so different workspaces
   // drive different projects. When the workspace isn't folder-bound (e.g. the
@@ -1640,20 +1651,16 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
 
   // Real project folder (never the worktree). Persisted on the config so a
   // respawn, whose cwd may already be the worktree, still finds the root.
-  const projectRoot = wsPath
-    ?? config.projectRoot
-    ?? ((config.worktreePath && config.cwd === config.worktreePath)
-      ? path.resolve(config.worktreePath, '..', '..', '..')
-      : config.cwd)
+  // A roster row saved before worktrees existed has neither projectRoot nor a worktree choice: keep it where it was.
+  if (opts?.reconnect && !config.projectRoot && config.worktree === undefined) config.worktree = false
+  const projectRoot = deriveProjectRoot({ wsPath: wsPath ?? null, projectRoot: config.projectRoot, worktreePath: config.worktreePath, cwd: config.cwd })
   config.projectRoot = projectRoot
 
   // Agents share a project's .cog/ folders by slug, so two names that slug the
   // same would collide on one worktree/work dir.
   const slug = agentSlug(config.name)
-  const slugClash = hubForConfig(config).registry.list().some(
-    a => a.tabId === config.tabId && a.id !== config.id && agentSlug(a.name) === slug
-  )
-  if (slugClash) throw new Error(`Agent slug "${slug}" already in use in this project`)
+  const clashing = liveAgentForSlug(projectRoot, slug)
+  if (clashing && clashing.config.id !== config.id) throw new Error(`Agent slug "${slug}" already in use in this project`)
 
   const wantsWorktree = (config.worktree ?? defaultWorktreeForRole(config.role, config.cli)) && config.cli !== 'terminal'
   if (wantsWorktree) {
@@ -3533,7 +3540,7 @@ function setupIPC(): void {
       const agents = getVisibleAgents()
       return listAgentWorktrees(root).map(w => ({
         ...w,
-        agentName: agents.find(a => agentSlug(a.name) === w.slug)?.name ?? null,
+        agentName: liveAgentForSlug(root, w.slug)?.config.name ?? agents.find(a => agentSlug(a.name) === w.slug)?.name ?? null,
       }))
     } catch {
       return []
@@ -3544,7 +3551,7 @@ function setupIPC(): void {
     const root = activeWorkspaceProjectPath()
     if (!root) return { removed: false, detail: 'No project open' }
     try {
-      if (getVisibleAgents().some(a => agentSlug(a.name) === slug)) {
+      if (liveAgentForSlug(root, slug) || getVisibleAgents().some(a => agentSlug(a.name) === slug)) {
         return { removed: false, detail: 'Agent is still running' }
       }
       return removeAgentWorktree(root, slug, { force: !!force })
