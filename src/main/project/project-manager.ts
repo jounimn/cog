@@ -15,7 +15,41 @@ cog.db-shm
 agentorch.db
 agentorch.db-wal
 agentorch.db-shm
+worktrees/
+work/
 `
+
+/** Lines every `.cog/.gitignore` must carry; appended when missing from an existing file. */
+const GITIGNORE_REQUIRED_LINES = ['worktrees/', 'work/']
+
+/**
+ * Make sure `<cogDir>/.gitignore` ignores the Cog-owned scratch dirs.
+ *
+ * - Absent file: created with GITIGNORE_CONTENT.
+ * - Present file: existing bytes are kept as-is; only the required lines that
+ *   are missing (compared after trimming) are appended.
+ *
+ * Never throws: an unwritable .gitignore must not block opening a project.
+ */
+export function ensureCogGitignore(cogDir: string): void {
+  const gitignorePath = path.join(cogDir, '.gitignore')
+  try {
+    if (!fs.existsSync(gitignorePath)) {
+      fs.writeFileSync(gitignorePath, GITIGNORE_CONTENT, 'utf-8')
+      return
+    }
+
+    const existing = fs.readFileSync(gitignorePath, 'utf-8')
+    const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()))
+    const missing = GITIGNORE_REQUIRED_LINES.filter((line) => !present.has(line))
+    if (missing.length === 0) return
+
+    const lead = existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''
+    fs.appendFileSync(gitignorePath, lead + missing.map((line) => `${line}\n`).join(''), 'utf-8')
+  } catch (err) {
+    console.warn(`[cog] could not update ${gitignorePath}:`, err)
+  }
+}
 
 /**
  * Migrate a legacy .agentorch/ folder to .cog/ on project open.
@@ -237,10 +271,7 @@ export class ProjectManager {
 
     fs.mkdirSync(presetsDir, { recursive: true })
 
-    const gitignorePath = path.join(cogDir, '.gitignore')
-    if (!fs.existsSync(gitignorePath)) {
-      fs.writeFileSync(gitignorePath, GITIGNORE_CONTENT, 'utf-8')
-    }
+    ensureCogGitignore(cogDir)
   }
 
   initProject(projectPath: string): void {

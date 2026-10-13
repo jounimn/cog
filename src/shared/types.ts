@@ -59,6 +59,10 @@ export interface AgentConfig {
   // same conversation instead of starting over.
   sessionId?: string
   sessionStarted?: boolean
+  worktree?: boolean  // user choice: run this agent in its own git worktree
+  worktreePath?: string  // derived at spawn: absolute path of the worktree checkout
+  projectRoot?: string  // derived at spawn: the workspace folder, never the worktree
+  workDir?: string  // derived at spawn: scratch dir <project>/.cog/work/<slug> (not where the CLI runs)
 }
 
 export interface AgentState extends AgentConfig {
@@ -210,6 +214,8 @@ export const IPC = {
   GIT_BRANCHES: 'git:branches',
   GIT_CHECKOUT: 'git:checkout',
   GIT_NEW_BRANCH: 'git:new-branch',
+  WORKTREE_LIST: 'worktree:list',
+  WORKTREE_REMOVE: 'worktree:remove',
   TAB_GET_ALL: 'tab:get-all',
   TAB_CREATE: 'tab:create',
   TAB_CLOSE: 'tab:close',
@@ -473,6 +479,7 @@ export interface ProposedAgent {
   skills?: string[]
   providerUrl?: string
   theme?: AgentTheme
+  worktree?: boolean
 }
 
 export type TeamProposalStatus = 'pending' | 'approved' | 'rejected' | 'expired'
@@ -546,6 +553,7 @@ export interface CommunityAgent {
   experimental?: boolean
   skills?: string[]
   theme?: AgentTheme
+  worktree?: boolean
 }
 
 export interface CommunityTeam {

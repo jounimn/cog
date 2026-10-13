@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { AgentConfig } from '../../shared/types'
 import { SkillBrowser } from './SkillBrowser'
+import { agentSlug, defaultWorktreeForRole } from '../../shared/agent-worktree-defaults'
 
 export const ROLE_PRESETS = [
   { label: 'Orchestrator', value: 'orchestrator', hint: 'Coordinates agents, dispatches tasks, synthesizes results' },
@@ -140,6 +141,8 @@ export interface AgentConfigFormValue {
   customProviderUrl: string
   selectedSkills: Array<{ id: string; name: string }>
   showAdvanced: boolean
+  worktree: boolean
+  worktreeTouched: boolean
 }
 
 export interface AgentConfigFormProps {
@@ -164,6 +167,7 @@ export function buildSubmitConfig(v: AgentConfigFormValue): Omit<AgentConfig, 'i
     providerUrl: v.cli === 'openclaude' ? (v.providerUrl || v.customProviderUrl.trim()) || undefined : undefined,
     experimental: v.cli === 'grok' ? true : undefined,
     skills: v.selectedSkills.length > 0 ? v.selectedSkills.map(s => s.id) : undefined,
+    worktree: (v.cli || v.customCli.trim()) === 'terminal' ? false : v.worktree,
   }
 }
 
@@ -187,6 +191,8 @@ export function emptyFormValue(defaults?: Partial<AgentConfigFormValue>): AgentC
     customProviderUrl: '',
     selectedSkills: [],
     showAdvanced: false,
+    worktree: defaultWorktreeForRole('worker', 'claude'),
+    worktreeTouched: false,
     ...defaults,
   }
 }
@@ -197,8 +203,18 @@ export function AgentConfigForm({ value, onChange, errors }: AgentConfigFormProp
   const shellOptions = isWindows ? WINDOWS_SHELLS : POSIX_SHELLS
 
   const set = <K extends keyof AgentConfigFormValue>(key: K, v: AgentConfigFormValue[K]) => {
-    onChange(prev => ({ ...prev, [key]: v }))
+    onChange(prev => {
+      const next = { ...prev, [key]: v }
+      if (key === 'role' || key === 'customRole' || key === 'cli' || key === 'customCli') {
+        const cli = (next.cli || next.customCli).trim()
+        if (cli === 'terminal') next.worktree = false
+        else if (!next.worktreeTouched) next.worktree = defaultWorktreeForRole((next.role || next.customRole).trim(), cli)
+      }
+      return next
+    })
   }
+  const effectiveCli = (value.cli || value.customCli).trim()
+  const worktreeSlug = agentSlug(value.name) || 'agent'
 
   // Reset model + provider to defaults when CLI actually changes (not on mount)
   const prevCliRef = useRef(value.cli)
@@ -322,6 +338,19 @@ export function AgentConfigForm({ value, onChange, errors }: AgentConfigFormProp
           </button>
         </div>
         {errors?.cwd && <span style={errorStyle}>{errors.cwd}</span>}
+      </label>
+
+      <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
+        <input
+          type="checkbox"
+          checked={effectiveCli === 'terminal' ? false : value.worktree}
+          disabled={effectiveCli === 'terminal'}
+          onChange={e => onChange(prev => ({ ...prev, worktree: e.target.checked, worktreeTouched: true }))}
+        />
+        Isolated worktree
+        <span style={{ color: '#666', fontSize: '11px' }}>
+          .cog/worktrees/{worktreeSlug} · branch cog/{worktreeSlug}
+        </span>
       </label>
 
       <label style={labelStyle}>

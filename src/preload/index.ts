@@ -289,6 +289,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   gitBranches: () => ipcRenderer.invoke(IPC.GIT_BRANCHES),
   gitCheckout: (branch: string) => ipcRenderer.invoke(IPC.GIT_CHECKOUT, branch),
   gitNewBranch: (name: string) => ipcRenderer.invoke(IPC.GIT_NEW_BRANCH, name),
+  worktreeList: () => ipcRenderer.invoke(IPC.WORKTREE_LIST),
+  worktreeRemove: (slug: string, force: boolean) => ipcRenderer.invoke(IPC.WORKTREE_REMOVE, slug, force),
   // Voice recorder — Stream Deck integration
   onVoiceStart: (callback: () => void) => {
     const handler = () => callback()

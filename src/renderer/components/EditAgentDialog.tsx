@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import type { AgentConfig, AgentState } from '../../shared/types'
+import { defaultWorktreeForRole } from '../../shared/agent-worktree-defaults'
 import { AgentConfigForm, buildSubmitConfig, emptyFormValue, CLI_MODELS, OPENCLAUDE_PROVIDERS, type AgentConfigFormValue } from './AgentConfigForm'
 
 interface EditAgentDialogProps {
@@ -43,6 +44,8 @@ function configToFormValue(agent: AgentConfig): AgentConfigFormValue {
     customProviderUrl: formCustomProviderUrl,
     selectedSkills: (agent.skills ?? []).map(id => ({ id, name: id })),  // names re-resolved below
     showAdvanced: !!agent.promptRegex,
+    worktree: agent.worktree ?? defaultWorktreeForRole(agent.role, agent.cli),
+    worktreeTouched: agent.worktree !== undefined,
   }
 }
 

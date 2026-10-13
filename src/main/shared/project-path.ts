@@ -12,15 +12,21 @@ import * as path from 'path'
  * realpath the parent so a symlinked parent can't escape the sandbox on a
  * subsequent write.
  *
+ * Relative paths resolve against `baseDir` when given (else the root); the
+ * containment check is always against `projectRoot`.
+ *
  * Returns the absolute resolved path (lexical, not the realpath) suitable
  * for fs.readFileSync/writeFileSync. Returns null when the path is invalid
  * or escapes the sandbox.
  */
-export function resolveProjectPath(projectRoot: string | null, requestedPath: string): string | null {
+export function resolveProjectPath(projectRoot: string | null, requestedPath: string, baseDir?: string): string | null {
   if (!projectRoot) return null
   if (typeof requestedPath !== 'string' || requestedPath.length === 0) return null
   const root = path.resolve(projectRoot)
-  const resolved = path.resolve(root, requestedPath)
+  // Relative paths resolve against baseDir (an agent's worktree); containment
+  // is always checked against the project root below.
+  const base = baseDir ? path.resolve(baseDir) : root
+  const resolved = path.resolve(base, requestedPath)
   let realResolved = resolved
   try {
     realResolved = fs.realpathSync(resolved)

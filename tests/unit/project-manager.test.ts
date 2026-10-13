@@ -37,14 +37,14 @@ describe('ProjectManager', () => {
       expect(gitignore).toContain('cog.db-shm')
     })
 
-    it('does not overwrite existing .gitignore', () => {
+    it('does not overwrite existing .gitignore, only appends missing worktree/work lines', () => {
       const cogDir = path.join(projectDir, '.cog')
       fs.mkdirSync(cogDir, { recursive: true })
       fs.writeFileSync(path.join(cogDir, '.gitignore'), 'custom content')
 
       pm.initProject(projectDir)
       const gitignore = fs.readFileSync(path.join(cogDir, '.gitignore'), 'utf-8')
-      expect(gitignore).toBe('custom content')
+      expect(gitignore).toBe('custom content\nworktrees/\nwork/\n')
     })
 
     it('sets current project', () => {

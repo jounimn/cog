@@ -54,6 +54,12 @@ import { validateRespawnRequest } from './respawn-validation'
 import { sessionStrategyFor, sessionExists, sessionDirHasSessions, discoverSessionId, type SessionLaunch } from './agent-session'
 import { initStreamDeck, disposeStreamDeck, resolveCogsworthDir, getStreamDeckStatus, reconnectStreamDeck, buildWhisperClient } from './streamdeck'
 import { prepareLocalWhisper, isLocalWhisperReady } from './streamdeck/local-whisper-prepare'
+import { buildInitialPrompt } from './agent-prompt'
+import { deriveProjectRoot } from './agent-root'
+import { shouldReleaseOnRespawn } from './worktree-respawn'
+import { agentSlug, defaultWorktreeForRole } from '../shared/agent-worktree-defaults'
+import { ensureAgentWorktree, releaseAgentWorktree, ensureWorkDir, listAgentWorktrees, removeAgentWorktree } from './git/agent-worktree'
+import { isTransientFsError } from './git/agent-worktree-pure'
 import { BoardStore } from './db/board-store'
 import { BoardAppearanceStore } from './db/board-appearance-store'
 import { saveImageBytes, saveRenderBytes, renderPathForPage } from './board/board-files'
@@ -1324,28 +1330,9 @@ function onInitialPromptInjected(config: AgentConfig): void {
   persistAgentConfig(config)
 }
 
-// Build the initial prompt injected when the CLI first becomes ready.
-// Keeps it short so the agent doesn't waste context — just tells it who it is
-// and to check MCP tools for instructions.
-function buildInitialPrompt(config: AgentConfig): string {
-  const isOrchestrator = (config.role || '').trim().toLowerCase() === 'orchestrator'
-  const baseTools = `send_message, get_messages, get_agents, read_ceo_notes, get_agent_output, post_task, read_tasks, claim_task, complete_task, abandon_task, get_task, post_info, read_info, delete_info, update_info, update_status, get_message_history, ack_messages, read_file, write_file, list_directory`
-  const orchestratorTools = isOrchestrator ? `, notify_user, propose_team` : ''
-  const lines = [
-    `You are "${config.name}" (role: ${config.role}) in a Cog workspace.`,
-    `You have Cog MCP tools: ${baseTools}${orchestratorTools}.`,
-    isOrchestrator
-      ? `As orchestrator you have two extra tools: notify_user(message, priority) posts to the user's inbox panel for messages targeted at the human (use sparingly, with priority high/urgent only when the user genuinely needs to act). propose_team({summary, agents}) submits a team for the user to approve in a confirmation modal — agents do NOT spawn until the user clicks Approve, so wait for the user response.`
-      : '',
-    `Do these steps NOW: 1) Call read_ceo_notes() for your instructions. 2) Call get_messages() to check for messages. 3) Call read_tasks() to check for open tasks you can claim.`,
-    `Your CEO notes define your workflow. Follow them exactly. After initial setup, WAIT for nudges — do NOT poll.`,
-  ].filter(Boolean)
-  return lines.join(' ')
-}
-
 // Build a reconnect prompt that includes context about what the agent was doing before it crashed.
-function buildReconnectPrompt(config: AgentConfig): string {
-  const base = buildInitialPrompt(config)
+function buildReconnectPrompt(config: AgentConfig, projectRoot: string): string {
+  const base = buildInitialPrompt(config, projectRoot)
 
   const contextParts: string[] = []
 
@@ -1395,13 +1382,65 @@ function hubForConfig(config: AgentConfig): HubServer {
 // Dual-emits COG_* (new) and AGENTORCH_* (legacy) so in-flight agents keep
 // working across the rebrand. The AGENTORCH_* aliases can be dropped in a
 // future release.
-function buildMcpEnv(config: AgentConfig): Record<string, string> {
+// Post a worktree-related note to the agent's own inbox. The inbox may be
+// unavailable (hub not ready); never let that break spawn/teardown.
+function postWorktreeNote(config: AgentConfig, text: string): void {
+  try {
+    hubForConfig(config).inboxChannel.postMessage(config.id, config.name, text, 'normal', ['worktree'], config.tabId)
+  } catch { /* inbox unavailable */ }
+}
+
+// ensureWorkDir that never throws: on failure (read-only / missing project
+// folder) leave workDir undefined, tell the agent, and let the spawn continue.
+function safeEnsureWorkDir(config: AgentConfig, projectRoot: string): string | undefined {
+  try {
+    return ensureWorkDir(projectRoot, config.name)
+  } catch (err: any) {
+    postWorktreeNote(config, `"${config.name}": could not create the work dir under .cog/work: ${err?.message ?? String(err)}`)
+    return undefined
+  }
+}
+
+// Release an agent's worktree after its PTY is gone; keep it (with an inbox
+// note) when dirty or on git errors. Never throws.
+//
+// On Windows the shell we just killed can hold the worktree folder for a
+// moment, so `git worktree remove` fails with EBUSY/Permission denied even
+// though the tree is clean. Those failures are retried a few times off the
+// event loop; the note is only posted once the last attempt fails. A retry
+// is skipped when a live agent has meanwhile taken the worktree back (quick
+// respawn under the same name).
+const WORKTREE_RELEASE_RETRIES = 4
+const WORKTREE_RELEASE_RETRY_MS = 750
+function releaseWorktreeWithNotes(config: AgentConfig, projectRoot: string, attempt = 0): void {
+  try {
+    const rel = releaseAgentWorktree(projectRoot, config.name)
+    if (rel.reason === 'dirty') {
+      postWorktreeNote(config, `Worktree of "${config.name}" kept at ${rel.path}: uncommitted changes.`)
+    } else if (rel.reason === 'git-error') {
+      if (isTransientFsError(rel.detail ?? '') && attempt < WORKTREE_RELEASE_RETRIES) {
+        setTimeout(() => {
+          const live = liveAgentForSlug(projectRoot, agentSlug(config.name))
+          if (live && live.config.worktreePath) return // reclaimed by a new spawn
+          releaseWorktreeWithNotes(config, projectRoot, attempt + 1)
+        }, WORKTREE_RELEASE_RETRY_MS)
+        return
+      }
+      postWorktreeNote(config, `Worktree of "${config.name}" kept at ${rel.path}: ${rel.detail}`)
+    }
+  } catch (err) {
+    console.error(`[worktree] release failed for ${config.name}:`, err)
+  }
+}
+
+function buildMcpEnv(config: AgentConfig, projectRoot: string): Record<string, string> {
   const h = hubForConfig(config)
   const env: Record<string, string> = {
     COG_HUB_PORT: String(h.port),
     COG_HUB_SECRET: h.secret,
     COG_AGENT_ID: config.id,
     COG_AGENT_NAME: config.name,
+    COG_PROJECT_ROOT: projectRoot,
     AGENTORCH_HUB_PORT: String(h.port),
     AGENTORCH_HUB_SECRET: h.secret,
     AGENTORCH_AGENT_ID: config.id,
@@ -1416,6 +1455,8 @@ function buildMcpEnv(config: AgentConfig): Record<string, string> {
     env.COG_TAB_ID = config.tabId
     env.AGENTORCH_TAB_ID = config.tabId
   }
+  if (config.workDir) env.COG_WORK_DIR = config.workDir
+  if (config.worktreePath) env.COG_WORKTREE = config.worktreePath
   if (config.cli === 'pi') env.PI_CODING_AGENT_DIR = piAgentDir(config.id)
   return env
 }
@@ -1447,7 +1488,8 @@ function prepareAgentMcpConfig(config: AgentConfig, mcpServerPath: string): stri
 function spawnPtyAndWire(
   config: AgentConfig,
   mcpConfigPath: string,
-  mcpEnv: Record<string, string>
+  mcpEnv: Record<string, string>,
+  projectRoot: string
 ): void {
   const mcpServerPath = getMcpServerPath()
   // The agent's OWN context hub (Stage 4): its registry + PTY-lifecycle status
@@ -1462,6 +1504,7 @@ function spawnPtyAndWire(
     config,
     mcpConfigPath,
     extraEnv: mcpEnv,
+    projectRoot,
     onData: (data) => {
       mainWindow.webContents.send(IPC.PTY_OUTPUT, config.id, data)
       // Forward to mobile WS subscribers. No-op when nobody is watching
@@ -1557,6 +1600,8 @@ function spawnPtyAndWire(
 function reconnectAgent(config: AgentConfig): void {
   // Clean up stale state from previous instance, on the agent's OWN context hub.
   const h = hubForConfig(config)
+  // The dying PTY knows the real project root; config.cwd may be the worktree.
+  const projectRoot = agents.get(config.id)?.projectRoot ?? config.cwd
   try { h.registry.remove(config.name) } catch { /* already removed */ }
   agents.delete(config.id)
   hasReceivedInitialPrompt.delete(config.id)
@@ -1564,14 +1609,14 @@ function reconnectAgent(config: AgentConfig): void {
   const mcpServerPath = getMcpServerPath()
   const mcpConfigPath = prepareAgentMcpConfig(config, mcpServerPath)
 
-  const mcpEnv = buildMcpEnv(config)
+  const mcpEnv = buildMcpEnv(config, projectRoot)
   h.registry.register(config)
 
-  const initialPrompt = buildReconnectPrompt(config)
+  const initialPrompt = buildReconnectPrompt(config, projectRoot)
   initialPrompts.set(config.id, initialPrompt)
   hasReceivedInitialPrompt.add(config.id)
 
-  spawnPtyAndWire(config, mcpConfigPath, mcpEnv)
+  spawnPtyAndWire(config, mcpConfigPath, mcpEnv, projectRoot)
 
   console.log(`Agent "${config.name}" reconnected successfully`)
 }
@@ -1606,12 +1651,66 @@ function uniqueAgentName(desired: string): string {
 // workshop spawn endpoint (mobile). Preserves all side effects: MCP config,
 // hub registration, skill prompt composition, PTY lifecycle wiring, CLI
 // launch command sequencing, and workspace window updates.
+// Live PTY (any workspace) running as the agent that owns <projectRoot>/.cog/*/<slug>.
+function liveAgentForSlug(projectRoot: string, slug: string): ManagedPty | undefined {
+  const norm = (p: string): string => path.resolve(p).toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '')
+  const target = norm(projectRoot)
+  for (const managed of agents.values()) {
+    if (norm(managed.projectRoot) === target && agentSlug(managed.config.name) === slug) return managed
+  }
+  return undefined
+}
+
 function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): { id: string; mcpConfigPath: string } {
   // P2: an agent runs in its workspace's bound folder, so different workspaces
   // drive different projects. When the workspace isn't folder-bound (e.g. the
   // default tab), keep the config's cwd (which defaults to the current project).
   const wsPath = config.tabId ? workspaceManager?.projectPathFor(config.tabId) : null
   if (wsPath) config.cwd = wsPath
+
+  // Real project folder (never the worktree). Persisted on the config so a
+  // respawn, whose cwd may already be the worktree, still finds the root.
+  // A roster row saved before worktrees existed has neither projectRoot nor a worktree choice: keep it where it was.
+  if (opts?.reconnect && !config.projectRoot && config.worktree === undefined) config.worktree = false
+  const projectRoot = deriveProjectRoot({ wsPath: wsPath ?? null, projectRoot: config.projectRoot, worktreePath: config.worktreePath, cwd: config.cwd })
+  config.projectRoot = projectRoot
+
+  // Agents share a project's .cog/ folders by slug, so two names that slug the
+  // same would collide on one worktree/work dir.
+  const slug = agentSlug(config.name)
+  const clashing = liveAgentForSlug(projectRoot, slug)
+  if (clashing && clashing.config.id !== config.id) throw new Error(`Agent slug "${slug}" already in use in this project`)
+
+  const wantsWorktree = (config.worktree ?? defaultWorktreeForRole(config.role, config.cli)) && config.cli !== 'terminal'
+  if (wantsWorktree) {
+    let r: ReturnType<typeof ensureAgentWorktree>
+    try {
+      r = ensureAgentWorktree(projectRoot, config.name)
+    } catch (err: any) {
+      r = { ok: false, reason: 'git-error', detail: err?.message ?? String(err), workDir: safeEnsureWorkDir(config, projectRoot) as string }
+    }
+    config.workDir = r.workDir || undefined
+    if (r.ok) {
+      config.worktreePath = r.path
+      config.cwd = r.path
+      if (r.staleRenamedTo) postWorktreeNote(config, `Old worktree folder renamed to ${r.staleRenamedTo}`)
+    } else {
+      config.worktreePath = undefined
+      config.cwd = projectRoot
+      const head = `"${config.name}" spawned in the project folder: `
+      const why =
+        r.reason === 'not-git' ? 'it is not a git repository, so no worktree was created.'
+        : r.reason === 'git-missing' ? 'git was not found on PATH, so no worktree was created.'
+        : r.reason === 'branch-busy' ? `branch cog/${slug} is already checked out elsewhere, so no worktree was created.`
+        : `git failed: ${r.detail}`
+      postWorktreeNote(config, head + why)
+    }
+  } else {
+    config.workDir = safeEnsureWorkDir(config, projectRoot)
+    // A respawn that no longer wants a worktree must leave the old checkout.
+    if (config.worktreePath && config.cwd === config.worktreePath) config.cwd = projectRoot
+    config.worktreePath = undefined
+  }
 
   // Apply persisted theme for this agent (if any) — preserves explicit override from preset
   const projectPath = projectManager.currentProject?.path
@@ -1641,7 +1740,7 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
   const mcpServerPath = getMcpServerPath()
   const mcpConfigPath = prepareAgentMcpConfig(config, mcpServerPath)
 
-  const mcpEnv = buildMcpEnv(config)
+  const mcpEnv = buildMcpEnv(config, projectRoot)
 
   // Register on the agent's OWN context hub (Stage 4) so its registry entry +
   // metrics live with the workspace it belongs to, not whichever is active.
@@ -1667,12 +1766,12 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
 
   // On a restart respawn, use the reconnect prompt so the fresh CLI process is
   // re-oriented ("you were previously running…") instead of treated as brand new.
-  const initialPrompt = opts?.reconnect ? buildReconnectPrompt(config) : buildInitialPrompt(config)
+  const initialPrompt = opts?.reconnect ? buildReconnectPrompt(config, projectRoot) : buildInitialPrompt(config, projectRoot)
   initialPrompts.set(config.id, initialPrompt)
   // Block prompt injection until CLI commands are sent
   hasReceivedInitialPrompt.add(config.id)
 
-  spawnPtyAndWire(config, mcpConfigPath, mcpEnv)
+  spawnPtyAndWire(config, mcpConfigPath, mcpEnv, projectRoot)
 
   return { id: config.id, mcpConfigPath }
 }
@@ -1700,7 +1799,8 @@ function spawnProposalAgents(proposal: TeamProposal): { spawned: number; total: 
       providerUrl: a.providerUrl,
       skills: a.skills,
       tabId,
-      theme: a.theme
+      theme: a.theme,
+      worktree: a.worktree ?? defaultWorktreeForRole(a.role, a.cli)
     }
     try {
       handleSpawnAgent(config)
@@ -1802,6 +1902,7 @@ function teardownAgent(managed: ManagedPty): void {
   manualKills.add(id) // Prevent auto-reconnect
   cancelSessionDiscovery(id)
   killPty(managed)
+  if (managed.config.worktreePath) releaseWorktreeWithNotes(managed.config, managed.projectRoot)
   // Target the agent's OWN context (Stage 4): its registry entry + roster live
   // on that workspace's hub/DB, not whichever is active.
   const ctx = contextRegistry.resolveForSpawn(managed.config.tabId)
@@ -2733,6 +2834,18 @@ function setupIPC(): void {
     managed.mcpConfigPath = null
     cancelSessionDiscovery(agentId)
     killPty(managed)
+    // Release the old worktree when the new spawn will not reuse it: renamed
+    // (new slug), no longer wants a worktree, or the project folder changed.
+    // Same slug, same root, still wants one: the new spawn reuses it.
+    const respawnTab = newConfigInput.tabId ?? currentConfig.tabId
+    const respawnWsPath = (respawnTab ? workspaceManager?.projectPathFor(respawnTab) : null) ?? null
+    if (shouldReleaseOnRespawn(
+      { name: currentConfig.name, worktreePath: currentConfig.worktreePath, projectRoot: managed.projectRoot },
+      newConfigInput,
+      respawnWsPath
+    )) {
+      releaseWorktreeWithNotes(currentConfig, managed.projectRoot)
+    }
 
     // Wipe history under old name
     try { hub.registry.remove(oldName) } catch { /* ignore */ }
@@ -2750,6 +2863,11 @@ function setupIPC(): void {
       ...newConfigInput,
       name: newName,
       id: agentId,
+      // Keep the project root / worktree link so the spawn does not mistake the
+      // worktree for the project (only when the folder was not changed).
+      ...(newConfigInput.cwd === currentConfig.cwd
+        ? { projectRoot: managed.projectRoot, worktreePath: currentConfig.worktreePath }
+        : {}),
       // History wipe: never carry the old session into the new config.
       sessionId: undefined,
       sessionStarted: undefined,
@@ -3430,6 +3548,33 @@ function setupIPC(): void {
     if (!root) return { error: 'No project' }
     try { gitOps.createBranch(root, name); return { status: 'ok' } }
     catch (e: any) { return { error: e.message } }
+  })
+
+  ipcMain.handle(IPC.WORKTREE_LIST, () => {
+    const root = activeWorkspaceProjectPath()
+    if (!root) return []
+    try {
+      const agents = getVisibleAgents()
+      return listAgentWorktrees(root).map(w => ({
+        ...w,
+        agentName: liveAgentForSlug(root, w.slug)?.config.name ?? agents.find(a => agentSlug(a.name) === w.slug)?.name ?? null,
+      }))
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle(IPC.WORKTREE_REMOVE, (_event, slug: string, force: boolean) => {
+    const root = activeWorkspaceProjectPath()
+    if (!root) return { removed: false, detail: 'No project open' }
+    try {
+      if (liveAgentForSlug(root, slug) || getVisibleAgents().some(a => agentSlug(a.name) === slug)) {
+        return { removed: false, detail: 'Agent is still running' }
+      }
+      return removeAgentWorktree(root, slug, { force: !!force })
+    } catch (e: any) {
+      return { removed: false, detail: e?.message ?? String(e) }
+    }
   })
 
   // Bug report — posts directly to GitHub Issues via API (no user login needed)

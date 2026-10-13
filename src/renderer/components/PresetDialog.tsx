@@ -605,7 +605,8 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
         ...(a.model ? { model: a.model } : {}),
         ...(a.experimental ? { experimental: a.experimental } : {}),
         ...(a.skills && a.skills.length > 0 ? { skills: a.skills } : {}),
-        ...(a.theme ? { theme: a.theme } : {})
+        ...(a.theme ? { theme: a.theme } : {}),
+        ...(a.worktree !== undefined ? { worktree: a.worktree } : {})
       })))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open preset for sharing')
@@ -678,7 +679,7 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
             id: a.id,
             name: a.name,
             cli: a.cli,
-            cwd: a.cwd,
+            cwd: a.projectRoot ?? a.cwd,
             role: a.role,
             ceoNotes: a.ceoNotes,
             shell: a.shell,
@@ -686,7 +687,8 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
             autoMode: a.autoMode,
             promptRegex: a.promptRegex,
             model: a.model,
-            experimental: a.experimental
+            experimental: a.experimental,
+            worktree: a.worktree
           }))
 
       await window.electronAPI.savePreset(presetName.trim(), agentConfigs, windowPositions, canvas)
@@ -793,7 +795,7 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
         id: a.id,
         name: a.name,
         cli: a.cli,
-        cwd: a.cwd,
+        cwd: a.projectRoot ?? a.cwd,
         role: a.role,
         ceoNotes: a.ceoNotes,
         shell: a.shell,
@@ -801,7 +803,8 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
         autoMode: a.autoMode,
         promptRegex: a.promptRegex,
         model: a.model,
-        experimental: a.experimental
+        experimental: a.experimental,
+        worktree: a.worktree
       }))
 
       await window.electronAPI.savePreset(name, agentConfigs, windowPositions, canvas)
@@ -836,7 +839,8 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
           ...(a.model ? { model: a.model } : {}),
           ...(a.experimental ? { experimental: a.experimental } : {}),
           ...(a.skills ? { skills: a.skills } : {}),
-          ...(a.theme ? { theme: a.theme } : {})
+          ...(a.theme ? { theme: a.theme } : {}),
+          ...(a.worktree !== undefined ? { worktree: a.worktree } : {})
         }))
       } else if (templateToLoad && activeTab === 'templates') {
         // Loading from built-in template — no saved positions

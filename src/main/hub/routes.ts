@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express'
 import * as fs from 'fs'
 import * as path from 'path'
 import { resolveProjectPath as resolveProjectPathShared } from '../shared/project-path'
+import { resolveFileBase } from './file-base'
 import type { AgentRegistry } from './agent-registry'
 import type { MessageRouter } from './message-router'
 import type { Pinboard } from './pinboard'
@@ -542,8 +543,12 @@ export function createRoutes(
 
   // --- File operation routes ---
 
-  const resolveProjectPath = (requestedPath: string): string | null =>
-    resolveProjectPathShared(projectPathRef.path, requestedPath)
+  // Relative paths resolve against the calling agent's cwd (its worktree),
+  // identified by the X-Cog-Agent header; containment stays the project root.
+  const resolveProjectPath = (req: Request, requestedPath: string): string | null => {
+    const base = resolveFileBase(n => registry.get(n), req.header('x-cog-agent'), projectPathRef.path)
+    return resolveProjectPathShared(projectPathRef.path, requestedPath, base)
+  }
 
   router.get('/files/read', (req: Request, res: Response) => {
     const filePath = req.query.path as string
@@ -551,7 +556,7 @@ export function createRoutes(
       res.status(400).json({ error: 'path query parameter is required' })
       return
     }
-    const resolved = resolveProjectPath(filePath)
+    const resolved = resolveProjectPath(req, filePath)
     if (!resolved) {
       res.status(403).json({ error: 'Path outside project directory' })
       return
@@ -584,7 +589,7 @@ export function createRoutes(
       res.status(400).json({ error: 'path and content are required' })
       return
     }
-    const resolved = resolveProjectPath(filePath)
+    const resolved = resolveProjectPath(req, filePath)
     if (!resolved) {
       res.status(403).json({ error: 'Path outside project directory' })
       return
@@ -605,7 +610,7 @@ export function createRoutes(
 
   router.get('/files/list', (req: Request, res: Response) => {
     const dirPath = (req.query.path as string) || '.'
-    const resolved = resolveProjectPath(dirPath)
+    const resolved = resolveProjectPath(req, dirPath)
     if (!resolved) {
       res.status(403).json({ error: 'Path outside project directory' })
       return
