@@ -59,6 +59,9 @@ export interface AgentConfig {
   // same conversation instead of starting over.
   sessionId?: string
   sessionStarted?: boolean
+  worktree?: boolean  // user choice: run this agent in its own git worktree
+  worktreePath?: string  // derived at spawn: absolute path of the worktree checkout
+  workDir?: string  // derived at spawn: directory the CLI actually runs in (worktree or cwd)
 }
 
 export interface AgentState extends AgentConfig {
@@ -546,6 +549,7 @@ export interface CommunityAgent {
   experimental?: boolean
   skills?: string[]
   theme?: AgentTheme
+  worktree?: boolean
 }
 
 export interface CommunityTeam {
