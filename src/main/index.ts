@@ -1681,6 +1681,8 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
     }
   } else {
     config.workDir = safeEnsureWorkDir(config, projectRoot)
+    // A respawn that no longer wants a worktree must leave the old checkout.
+    if (config.worktreePath && config.cwd === config.worktreePath) config.cwd = projectRoot
     config.worktreePath = undefined
   }
 
@@ -2806,9 +2808,18 @@ function setupIPC(): void {
     managed.mcpConfigPath = null
     cancelSessionDiscovery(agentId)
     killPty(managed)
-    // A rename changes the slug, so the new spawn gets a new worktree; release
-    // the old one. Same slug: the new spawn reuses it.
-    if (currentConfig.worktreePath && agentSlug(newConfigInput.name.trim()) !== agentSlug(currentConfig.name)) {
+    // Release the old worktree when the new spawn will not reuse it: renamed
+    // (new slug), no longer wants a worktree, or the project folder changed.
+    // Same slug, same root, still wants one: the new spawn reuses it.
+    const stillWantsWorktree =
+      (newConfigInput.worktree ?? defaultWorktreeForRole(newConfigInput.role, newConfigInput.cli)) &&
+      newConfigInput.cli !== 'terminal'
+    if (
+      currentConfig.worktreePath &&
+      (agentSlug(newConfigInput.name.trim()) !== agentSlug(currentConfig.name) ||
+        !stillWantsWorktree ||
+        newConfigInput.cwd !== currentConfig.cwd)
+    ) {
       releaseWorktreeWithNotes(currentConfig, managed.projectRoot)
     }
 
