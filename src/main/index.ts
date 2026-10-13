@@ -49,7 +49,7 @@ import * as themesStore from './themes/themes-store'
 import * as workspaceThemeStore from './themes/workspace-theme-store'
 import { getWorkspaceThemeById, WORKSPACE_THEMES } from '../shared/workspace-themes'
 import { migrateLegacyUserData } from './migration/userdata-migration'
-import type { AgentConfig, AgentTheme, SleepSettings, RemoteSetupProgress, CommunityAgent, CommunityCategory, RespawnResult, NotificationThreshold, ProposedAgent, TeamProposal, TelegramStatus } from '../shared/types'
+import type { AgentConfig, AgentState, AgentTheme, SleepSettings, RemoteSetupProgress, CommunityAgent, CommunityCategory, RespawnResult, NotificationThreshold, ProposedAgent, TeamProposal, TelegramStatus } from '../shared/types'
 import { IPC, DEFAULT_SLEEP_SETTINGS } from '../shared/types'
 import { validateRespawnRequest } from './respawn-validation'
 import { sessionStrategyFor, sessionExists, sessionDirHasSessions, discoverSessionId, type SessionLaunch } from './agent-session'
@@ -59,6 +59,7 @@ import { buildInitialPrompt } from './agent-prompt'
 import { deriveProjectRoot } from './agent-root'
 import { canSleep } from './sleep/sleep-policy'
 import { reconnectWorktreeNote, slugTakenBySleeper } from './sleep/sleep-state'
+import { routeTaskNudge, type RoutableAgent } from './sleep/wake-routing'
 import { shouldReleaseOnRespawn } from './worktree-respawn'
 import { agentSlug, defaultWorktreeForRole } from '../shared/agent-worktree-defaults'
 import { ensureAgentWorktree, releaseAgentWorktree, ensureWorkDir, listAgentWorktrees, removeAgentWorktree } from './git/agent-worktree'
@@ -2026,6 +2027,11 @@ function findSleepingConfig(nameOrId: string): AgentConfig | undefined {
   return undefined
 }
 
+// A sleeping roster row exists for this agent id (schedules keep it alive).
+function rosterHasSleeping(id: string): boolean {
+  return findSleepingConfig(id)?.id === id
+}
+
 // teardownAgent for a sleeper (no PTY): drop roster row, registry entry,
 // queued nudges and frozen output, and release its worktree.
 function teardownSleepingAgent(cfg: AgentConfig): void {
@@ -2093,7 +2099,35 @@ function wakeAgent(id: string, reason: 'task' | 'user' | 'schedule'): { ok: true
 // trigger StatusDetector's prompt regex, so 'active' is never reached.
 const NUDGE_FALLBACK_DELAY = 5000
 
-function deliverNudge(agentName: string, nudge: string): void {
+// Registry entry of a sleeping or waking agent, searched across every live
+// workspace hub (a sleeper's entry lives on its own workspace's hub).
+function sleepStateOf(agentName: string): { status: 'sleeping' | 'waking'; id: string } | undefined {
+  const hubs = [hub, ...contextRegistry.ids().map(wsId => contextRegistry.get(wsId)?.hub)]
+  for (const h of hubs) {
+    const state = h?.registry.get(agentName)
+    if (state && (state.status === 'sleeping' || state.status === 'waking')) {
+      return { status: state.status, id: state.id }
+    }
+  }
+  return undefined
+}
+
+function deliverNudge(agentName: string, nudge: string, opts: { wake: boolean } = { wake: false }): void {
+  // Sleeping or waking: queue only (no fallback timer). flushPendingNudges
+  // delivers it once the woken CLI is ready. Only a sleeping agent is woken,
+  // and only when asked (tasks); a waking one never gets a second wake.
+  const asleep = sleepStateOf(agentName)
+  if (asleep) {
+    if (!pendingNudges.has(agentName)) pendingNudges.set(agentName, [])
+    pendingNudges.get(agentName)!.push(nudge)
+    if (opts.wake && asleep.status === 'sleeping') {
+      const id = findSleepingConfig(agentName)?.id ?? asleep.id
+      const woke = wakeAgent(id, 'task')
+      if (!woke.ok) console.warn(`[sleep] could not wake "${agentName}" for a task: ${woke.error}`)
+    }
+    return
+  }
+
   const managed = Array.from(agents.values()).find(a => a.config.name === agentName)
   if (!managed) return
 
@@ -2237,34 +2271,36 @@ function setupTaskNudge(hub: HubServer): void {
     // Skip the agent that created the task — nudging the creator while it's still
     // processing the post_task tool response can cause TUI CLIs to re-render their
     // entire conversation history (cosmetic but confusing).
-    if (task.targetAgent) {
-      const managed = Array.from(agents.values()).find(m => m.config.name === task.targetAgent)
-      if (managed) {
-        const nudge = `[Cog] New task posted for you: "${task.title}" (id: ${task.id}) ${task.priority} priority. Claim it now with claim_task("${task.id}") or call read_tasks() to see all open tasks.`
-        deliverNudge(managed.config.name, nudge)
-      }
-      return
-    }
-
-    // Filter agents by targetRole if specified, otherwise nudge all non-orchestrators.
-    // Tab isolation: only nudge agents on the same workspace tab as the task.
-    const candidates = hub.registry.list().filter(agent => {
-      if (agent.status === 'disconnected' || agent.name === 'user') return false
-      if (agent.name === task.createdBy) return false
-      // Tab isolation: only nudge agents on the same tab
-      if (task.tabId && agent.tabId && task.tabId !== agent.tabId) return false
-      if (task.targetRole) {
-        return agent.role === task.targetRole
-      }
-      return agent.role !== 'orchestrator'
-    })
-
+    // Role tasks: filter by targetRole (else all non-orchestrators), same tab only.
+    // routeTaskNudge nudges the awake candidates, or wakes the most recently
+    // slept one when none is awake; a targeted sleeper is woken directly.
     const roleLabel = task.targetRole ? ` for ${task.targetRole}s` : ''
-    for (const agent of candidates) {
-      const nudge = `[Cog] New task posted${roleLabel}: "${task.title}" (id: ${task.id}) ${task.priority} priority. Claim it now with claim_task("${task.id}") or call read_tasks() to see all open tasks.`
-      deliverNudge(agent.name, nudge)
+    const nudge = task.targetAgent
+      ? `[Cog] New task posted for you: "${task.title}" (id: ${task.id}) ${task.priority} priority. Claim it now with claim_task("${task.id}") or call read_tasks() to see all open tasks.`
+      : `[Cog] New task posted${roleLabel}: "${task.title}" (id: ${task.id}) ${task.priority} priority. Claim it now with claim_task("${task.id}") or call read_tasks() to see all open tasks.`
+
+    const registered = hub.registry.list()
+    const route = routeTaskNudge(
+      {
+        id: task.id,
+        title: task.title,
+        createdBy: task.createdBy ?? '',
+        targetAgent: task.targetAgent ?? undefined,
+        targetRole: task.targetRole ?? undefined,
+        tabId: task.tabId ?? undefined
+      },
+      registered.map(toRoutable)
+    )
+    for (const name of route.write) deliverNudge(name, nudge)
+    for (const id of route.wake) {
+      const name = registered.find(a => a.id === id)?.name ?? findRosterConfig(id)?.name
+      if (name) deliverNudge(name, nudge, { wake: true })
     }
   }
+}
+
+function toRoutable(a: AgentState): RoutableAgent {
+  return { id: a.id, name: a.name, role: a.role, tabId: a.tabId, status: a.status, sleptAt: a.sleptAt }
 }
 
 // When info is posted, nudge orchestrator agents so they know to read it.
@@ -2598,10 +2634,19 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
     clock: () => Date.now(),
     ptyWriter: (agentId, text) => {
       const managed = agents.get(agentId)
-      if (!managed) throw new Error(`Agent ${agentId} not found`)
+      if (!managed) {
+        // A sleeping agent keeps its schedules: queue the prompt (no wake);
+        // it is delivered when a task or the user wakes the agent.
+        const sleeper = findSleepingConfig(agentId)
+        if (sleeper) {
+          deliverNudge(sleeper.name, text)
+          return
+        }
+        throw new Error(`Agent ${agentId} not found`)
+      }
       writeNudgeToPty(managed, text)
     },
-    agentLookup: (agentId) => agents.has(agentId),
+    agentLookup: (agentId) => agents.has(agentId) || rosterHasSleeping(agentId),
     onChange: () => {
       if (!promptScheduler) return
       sendToUi(IPC.SCHEDULES_UPDATED, promptScheduler.list())
