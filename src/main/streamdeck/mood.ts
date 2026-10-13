@@ -17,5 +17,7 @@ export function moodForStatus(status: AgentStatus): string {
     case 'active': return MOODS.thinking
     case 'working': return MOODS.focused
     case 'disconnected': return MOODS.dead
+    case 'sleeping': return MOODS.sleeping
+    case 'waking': return MOODS.neutral
   }
 }
