@@ -44,11 +44,24 @@ export class SleepManager {
     }
   }
 
+  /** Drop all state for an agent that left the live set (slept, killed, respawned). */
+  forget(id: string): void {
+    this.idleSinceById.delete(id)
+  }
+
   idleSince(id: string): number | null {
     return this.idleSinceById.get(id) ?? null
   }
 
   tick(): void {
+    try {
+      this.runTick()
+    } catch (err) {
+      console.error('[sleep] tick failed', err)
+    }
+  }
+
+  private runTick(): void {
     const now = this.now()
     const decision = pickAgentsToSleep({
       agents: this.deps.candidates(),

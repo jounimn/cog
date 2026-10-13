@@ -1631,6 +1631,7 @@ function reconnectAgent(config: AgentConfig): void {
   const projectRoot = agents.get(config.id)?.projectRoot ?? config.cwd
   try { h.registry.remove(config.name) } catch { /* already removed */ }
   agents.delete(config.id)
+  forgetIdle(config.tabId, config.id)
   hasReceivedInitialPrompt.delete(config.id)
 
   const mcpServerPath = getMcpServerPath()
@@ -1973,8 +1974,14 @@ function teardownAgent(managed: ManagedPty): void {
   initialPrompts.delete(id)
   hasReceivedInitialPrompt.delete(id)
   agents.delete(id)
+  forgetIdle(managed.config.tabId, id)
   mainWindow?.webContents.send(IPC.AGENT_CLOSED_REMOTE, { agentId: id })
   mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+}
+
+// Drop a departed agent's idle clock so a later spawn/wake starts fresh.
+function forgetIdle(tabId: string | undefined, id: string): void {
+  contextRegistry.resolveForSpawn(tabId)?.sleepManager?.forget(id)
 }
 
 // Hibernate a live agent: free its PTY but keep its registry entry (status
@@ -2001,6 +2008,7 @@ function sleepAgent(id: string, reason: 'idle' | 'memory' | 'user'): { ok: true 
   if (config.cli === 'pi') cleanupPiAgentDir(piAgentDir(id))
   else if (managed.mcpConfigPath) cleanupConfig(managed.mcpConfigPath)
   agents.delete(id)
+  forgetIdle(config.tabId, id)
   persistAgentConfig(config)
   hubForConfig(config).registry.markSleeping(config.name, config.sleptAt)
   // Queued nudges stay queued for the wake; only the delivery timer goes.
@@ -2982,6 +2990,7 @@ function closeCtxResources(id: string, ctx: WorkspaceCtx): void {
     initialPrompts.delete(agentId)
     hasReceivedInitialPrompt.delete(agentId)
     agents.delete(agentId)
+    forgetIdle(managed.config.tabId, agentId)
   }
   try { ctx.promptScheduler.stopTicker() } catch { /* noop */ }
   ctx.sleepManager.stop()
@@ -3128,6 +3137,7 @@ function setupIPC(): void {
     initialPrompts.delete(agentId)
     hasReceivedInitialPrompt.delete(agentId)
     agents.delete(agentId)
+    forgetIdle(managed.config.tabId, agentId)
 
     // Spawn fresh with new config — preserve agent.id so window position state survives
     const mergedConfig: AgentConfig = {

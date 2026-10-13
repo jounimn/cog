@@ -56,13 +56,48 @@ describe('SleepManager', () => {
     expect(deps.sleep).toHaveBeenCalledWith('a1', 'idle')
   })
 
-  it('sleeps an agent noted idle once at spawn with no other transition', () => {
+  it('a spawn-time noteStatus idle alone starts the clock (no later transition)', () => {
+    const seen: Array<number | null> = []
+    const deps = makeDeps({
+      candidates: () => {
+        const idleSince = m.idleSince('a1')
+        seen.push(idleSince)
+        return [cand({ idleSince })]
+      }
+    })
+    const m: SleepManager = new SleepManager(deps)
+    m.noteStatus('a1', 'idle') // spawn
+    vi.setSystemTime(1_000_000 + 9 * 60_000)
+    m.tick()
+    expect(deps.sleep).not.toHaveBeenCalled()
+    vi.setSystemTime(1_000_000 + 10 * 60_000 + 1)
+    m.tick()
+    expect(seen).toEqual([1_000_000, 1_000_000])
+    expect(deps.sleep).toHaveBeenCalledWith('a1', 'idle')
+  })
+
+  it('forget clears idle state so a wake does not inherit a stale idleSince', () => {
     const deps = makeDeps({ candidates: () => [cand({ idleSince: m.idleSince('a1') })] })
     const m: SleepManager = new SleepManager(deps)
     m.noteStatus('a1', 'idle')
     vi.setSystemTime(1_000_000 + 11 * 60_000)
     m.tick()
-    expect(deps.sleep).toHaveBeenCalledWith('a1', 'idle')
+    expect(deps.sleep).toHaveBeenCalledTimes(1)
+    m.forget('a1')
+    expect(m.idleSince('a1')).toBeNull()
+    m.noteStatus('a1', 'idle') // wake
+    vi.setSystemTime(1_000_000 + 15 * 60_000)
+    m.tick()
+    expect(deps.sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('a throwing dep does not escape tick', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const deps = makeDeps({ freeMemMb: () => { throw new Error('boom') } })
+    const m = new SleepManager(deps)
+    expect(() => m.tick()).not.toThrow()
+    expect(err).toHaveBeenCalled()
+    err.mockRestore()
   })
 
   it('does not sleep before the timeout', () => {
