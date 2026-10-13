@@ -77,14 +77,15 @@ export function ensureAgentWorktree(projectRoot: string, agentName: string, run:
       return { ok: true, path: worktreePath, branch, workDir, reused: true }
     }
 
+    // An unregistered folder at the path: a non-empty one is someone's data,
+    // set it aside; an empty one is what a half-finished `git worktree remove`
+    // leaves when a dying shell still holds the directory (Windows), and git
+    // worktree add accepts an existing empty directory, so hand it over as is
+    // instead of an rmdir that would hit the same EBUSY.
     let staleRenamedTo: string | undefined
-    if (fs.existsSync(worktreePath)) {
-      if (fs.readdirSync(worktreePath).length === 0) {
-        fs.rmdirSync(worktreePath)
-      } else {
-        staleRenamedTo = `${worktreePath}.stale-${stamp(new Date())}`
-        fs.renameSync(worktreePath, staleRenamedTo)
-      }
+    if (fs.existsSync(worktreePath) && fs.readdirSync(worktreePath).length > 0) {
+      staleRenamedTo = `${worktreePath}.stale-${stamp(new Date())}`
+      fs.renameSync(worktreePath, staleRenamedTo)
     }
     fs.mkdirSync(path.dirname(worktreePath), { recursive: true })
 
@@ -120,7 +121,14 @@ export function releaseAgentWorktree(projectRoot: string, agentName: string, run
   const { worktreePath } = worktreePaths(projectRoot, agentName)
   try {
     const entries = parseWorktreeList(run('git worktree list --porcelain', projectRoot))
-    if (!findRegistered(entries, worktreePath)) return { removed: false, reason: 'absent', path: worktreePath }
+    if (!findRegistered(entries, worktreePath)) {
+      // Not a worktree any more. A half-finished remove can leave the empty
+      // folder behind (Windows handle timing); sweep it when it is free now.
+      try {
+        if (fs.existsSync(worktreePath) && fs.readdirSync(worktreePath).length === 0) fs.rmdirSync(worktreePath)
+      } catch { /* still held: ensure() copes with an empty leftover */ }
+      return { removed: false, reason: 'absent', path: worktreePath }
+    }
     if (run('git status --porcelain', worktreePath).trim() !== '') {
       return { removed: false, reason: 'dirty', path: worktreePath }
     }

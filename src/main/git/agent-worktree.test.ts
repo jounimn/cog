@@ -144,16 +144,19 @@ describe('ensureAgentWorktree', () => {
     expect(calls[calls.length - 1].cmd).toContain('git worktree add')
   })
 
-  it('deletes an empty unregistered folder before adding', () => {
+  it('hands an empty unregistered folder straight to git worktree add (no rmdir, no rename)', () => {
+    // A dying shell can still hold the empty folder on Windows (EBUSY on rmdir);
+    // git worktree add accepts an existing empty directory, so leave it alone.
     const { worktreePath } = worktreePaths(root, 'builder-1')
     fs.mkdirSync(worktreePath, { recursive: true })
-    const { run } = fakeRun({ 'git worktree list': porcelain(root) })
+    const { run, calls } = fakeRun({ 'git worktree list': porcelain(root) })
     const r = ensureAgentWorktree(root, 'builder-1', run)
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect(r.staleRenamedTo).toBeUndefined()
-    expect(fs.existsSync(worktreePath)).toBe(false)
-    expect(fs.readdirSync(path.dirname(worktreePath))).toEqual([])
+    expect(fs.existsSync(worktreePath)).toBe(true)
+    expect(fs.readdirSync(path.dirname(worktreePath))).toEqual(['builder-1'])
+    expect(calls[calls.length - 1].cmd).toContain('git worktree add')
   })
 })
 
@@ -164,6 +167,23 @@ describe('releaseAgentWorktree', () => {
     const r = releaseAgentWorktree(root, 'builder-1', run)
     expect(r).toMatchObject({ removed: false, reason: 'absent', path: worktreePath })
     expect(calls.some((c) => c.cmd.startsWith('git worktree remove'))).toBe(false)
+  })
+
+  it('sweeps an empty leftover folder when the worktree is no longer registered', () => {
+    const { worktreePath } = worktreePaths(root, 'builder-1')
+    fs.mkdirSync(worktreePath, { recursive: true })
+    const { run } = fakeRun({ 'git worktree list': porcelain(root) })
+    expect(releaseAgentWorktree(root, 'builder-1', run)).toMatchObject({ removed: false, reason: 'absent' })
+    expect(fs.existsSync(worktreePath)).toBe(false)
+  })
+
+  it('leaves a non-empty unregistered folder alone', () => {
+    const { worktreePath } = worktreePaths(root, 'builder-1')
+    fs.mkdirSync(worktreePath, { recursive: true })
+    fs.writeFileSync(path.join(worktreePath, 'keep.txt'), 'x')
+    const { run } = fakeRun({ 'git worktree list': porcelain(root) })
+    releaseAgentWorktree(root, 'builder-1', run)
+    expect(fs.existsSync(path.join(worktreePath, 'keep.txt'))).toBe(true)
   })
 
   it('removes when status is clean and keeps the branch', () => {

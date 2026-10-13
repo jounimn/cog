@@ -57,4 +57,15 @@ describe.skipIf(!hasGit)('agent worktree against a real repo', () => {
     expect(releaseAgentWorktree(root, 'Builder 1')).toMatchObject({ removed: false, reason: 'dirty' })
     expect(execSync('git branch --list cog/builder-1', { cwd: root, encoding: 'utf-8' })).toContain('cog/builder-1')
   }, 60000)
+
+  it('adds into an empty leftover folder (what a half-removed worktree leaves behind on Windows)', () => {
+    const leftover = path.join(root, '.cog', 'worktrees', 'builder-1')
+    fs.mkdirSync(leftover, { recursive: true })
+    const r = ensureAgentWorktree(root, 'Builder 1')
+    if (!r.ok) throw new Error(`ensure failed: ${r.detail}`)
+    expect(r.path).toBe(leftover)
+    expect(r.staleRenamedTo).toBeUndefined()
+    expect(fs.existsSync(path.join(leftover, '.git'))).toBe(true)
+    expect(listAgentWorktrees(root).map((w) => w.slug)).toEqual(['builder-1'])
+  }, 60000)
 })

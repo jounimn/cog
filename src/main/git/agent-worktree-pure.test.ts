@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseWorktreeList, isBranchBusyError } from './agent-worktree-pure'
+import { parseWorktreeList, isBranchBusyError, isTransientFsError } from './agent-worktree-pure'
 
 const sample = [
   'worktree C:/p/proj', 'HEAD 84297db0000000000000000000000000000000ab', 'branch refs/heads/main', '',
@@ -22,5 +22,19 @@ describe('isBranchBusyError', () => {
     expect(isBranchBusyError("fatal: 'cog/x' is already checked out at 'C:/p/other'")).toBe(true)
     expect(isBranchBusyError("fatal: 'cog/x' is already used by worktree at 'C:/p/other'")).toBe(true)
     expect(isBranchBusyError('fatal: not a git repository')).toBe(false)
+  })
+})
+
+describe('isTransientFsError', () => {
+  it('recognises Windows handle-timing failures from git and node', () => {
+    expect(isTransientFsError("EBUSY: resource busy or locked, rmdir 'C:\\p\\.cog\\worktrees\\b'")).toBe(true)
+    expect(isTransientFsError("fatal: failed to delete 'C:/p/.cog/worktrees/b': Permission denied")).toBe(true)
+    expect(isTransientFsError("EPERM: operation not permitted, rename 'C:\\p\\x'")).toBe(true)
+    expect(isTransientFsError('warning: failed to remove .cog/worktrees/b: Directory not empty')).toBe(true)
+  })
+  it('does not match ordinary git failures', () => {
+    expect(isTransientFsError("fatal: 'cog/x' is already checked out at 'C:/p/other'")).toBe(false)
+    expect(isTransientFsError('fatal: not a git repository')).toBe(false)
+    expect(isTransientFsError('')).toBe(false)
   })
 })

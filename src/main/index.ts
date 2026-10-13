@@ -56,8 +56,10 @@ import { initStreamDeck, disposeStreamDeck, resolveCogsworthDir, getStreamDeckSt
 import { prepareLocalWhisper, isLocalWhisperReady } from './streamdeck/local-whisper-prepare'
 import { buildInitialPrompt } from './agent-prompt'
 import { deriveProjectRoot } from './agent-root'
+import { shouldReleaseOnRespawn } from './worktree-respawn'
 import { agentSlug, defaultWorktreeForRole } from '../shared/agent-worktree-defaults'
 import { ensureAgentWorktree, releaseAgentWorktree, ensureWorkDir, listAgentWorktrees, removeAgentWorktree } from './git/agent-worktree'
+import { isTransientFsError } from './git/agent-worktree-pure'
 import { BoardStore } from './db/board-store'
 import { BoardAppearanceStore } from './db/board-appearance-store'
 import { saveImageBytes, saveRenderBytes, renderPathForPage } from './board/board-files'
@@ -1401,12 +1403,29 @@ function safeEnsureWorkDir(config: AgentConfig, projectRoot: string): string | u
 
 // Release an agent's worktree after its PTY is gone; keep it (with an inbox
 // note) when dirty or on git errors. Never throws.
-function releaseWorktreeWithNotes(config: AgentConfig, projectRoot: string): void {
+//
+// On Windows the shell we just killed can hold the worktree folder for a
+// moment, so `git worktree remove` fails with EBUSY/Permission denied even
+// though the tree is clean. Those failures are retried a few times off the
+// event loop; the note is only posted once the last attempt fails. A retry
+// is skipped when a live agent has meanwhile taken the worktree back (quick
+// respawn under the same name).
+const WORKTREE_RELEASE_RETRIES = 4
+const WORKTREE_RELEASE_RETRY_MS = 750
+function releaseWorktreeWithNotes(config: AgentConfig, projectRoot: string, attempt = 0): void {
   try {
     const rel = releaseAgentWorktree(projectRoot, config.name)
     if (rel.reason === 'dirty') {
       postWorktreeNote(config, `Worktree of "${config.name}" kept at ${rel.path}: uncommitted changes.`)
     } else if (rel.reason === 'git-error') {
+      if (isTransientFsError(rel.detail ?? '') && attempt < WORKTREE_RELEASE_RETRIES) {
+        setTimeout(() => {
+          const live = liveAgentForSlug(projectRoot, agentSlug(config.name))
+          if (live && live.config.worktreePath) return // reclaimed by a new spawn
+          releaseWorktreeWithNotes(config, projectRoot, attempt + 1)
+        }, WORKTREE_RELEASE_RETRY_MS)
+        return
+      }
       postWorktreeNote(config, `Worktree of "${config.name}" kept at ${rel.path}: ${rel.detail}`)
     }
   } catch (err) {
@@ -2818,15 +2837,13 @@ function setupIPC(): void {
     // Release the old worktree when the new spawn will not reuse it: renamed
     // (new slug), no longer wants a worktree, or the project folder changed.
     // Same slug, same root, still wants one: the new spawn reuses it.
-    const stillWantsWorktree =
-      (newConfigInput.worktree ?? defaultWorktreeForRole(newConfigInput.role, newConfigInput.cli)) &&
-      newConfigInput.cli !== 'terminal'
-    if (
-      currentConfig.worktreePath &&
-      (agentSlug(newConfigInput.name.trim()) !== agentSlug(currentConfig.name) ||
-        !stillWantsWorktree ||
-        newConfigInput.cwd !== currentConfig.cwd)
-    ) {
+    const respawnTab = newConfigInput.tabId ?? currentConfig.tabId
+    const respawnWsPath = (respawnTab ? workspaceManager?.projectPathFor(respawnTab) : null) ?? null
+    if (shouldReleaseOnRespawn(
+      { name: currentConfig.name, worktreePath: currentConfig.worktreePath, projectRoot: managed.projectRoot },
+      newConfigInput,
+      respawnWsPath
+    )) {
       releaseWorktreeWithNotes(currentConfig, managed.projectRoot)
     }
 

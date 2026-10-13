@@ -42,3 +42,12 @@ export function parseWorktreeList(porcelain: string): WorktreeEntry[] {
 export function isBranchBusyError(stderr: string): boolean {
   return /already (checked out|used by worktree)/.test(stderr)
 }
+
+/**
+ * True for failures that clear up by themselves once a dying process lets go
+ * of a folder: the Windows handle-timing family (EBUSY/EPERM/Permission
+ * denied/Directory not empty). Worth a short retry; anything else is not.
+ */
+export function isTransientFsError(detail: string): boolean {
+  return /EBUSY|EPERM|EACCES|Permission denied|Directory not empty|resource busy|being used by another process/i.test(detail)
+}
