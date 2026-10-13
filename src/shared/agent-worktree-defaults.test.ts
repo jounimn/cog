@@ -6,6 +6,10 @@ describe('agentSlug', () => {
   it('collapses runs of invalid chars into one dash', () => expect(agentSlug('Revisor ÀÉ 🚀 final')).toBe('revisor-final'))
   it('strips leading and trailing dashes', () => expect(agentSlug('--tester--')).toBe('tester'))
   it('keeps underscores and digits', () => expect(agentSlug('qa_2')).toBe('qa_2'))
+  it('preserves an internal hyphen run', () => {
+    expect(agentSlug('a--b')).toBe('a--b')
+    expect(agentSlug('a - b')).toBe('a---b')
+  })
   it('truncates to 60 chars', () => expect(agentSlug('a'.repeat(80))).toHaveLength(60))
   it('falls back to "agent" when nothing is left', () => expect(agentSlug('🚀🚀')).toBe('agent'))
 })

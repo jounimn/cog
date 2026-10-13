@@ -9,7 +9,7 @@ const NO_WORKTREE_ROLES = new Set(['orchestrator', 'researcher'])
 export function agentSlug(name: string): string {
   const slug = name
     .toLowerCase()
-    .replace(/[^a-z0-9_]+/g, '-')
+    .replace(/[^a-z0-9_-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, SLUG_MAX_LENGTH)
     .replace(/-+$/, '')
