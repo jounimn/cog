@@ -1524,10 +1524,17 @@ function spawnPtyAndWire(
       remoteWsHub?.pushAgentOutput(config.id, typeof data === 'string' ? data : String(data))
     },
     onExit: (exitCode) => {
+      // A slept PTY may exit after its agent was already woken into a new one:
+      // leave the new PTY's status, renderer terminal and config files alone.
+      const superseded = agents.has(config.id) && agents.get(config.id) !== managed
       if (!config.sleeping) h.registry.updateStatus(config.name, 'disconnected')
-      mainWindow.webContents.send(IPC.PTY_EXIT, config.id, exitCode)
-      if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
-      if (config.cli === 'pi') {
+      if (!superseded) {
+        mainWindow.webContents.send(IPC.PTY_EXIT, config.id, exitCode)
+        if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+      }
+      if (config.sleeping) {
+        // sleepAgent already removed the per-id config files.
+      } else if (config.cli === 'pi') {
         cleanupPiAgentDir(piAgentDir(config.id))
       } else if (managed.mcpConfigPath) {
         cleanupConfig(managed.mcpConfigPath)
@@ -1981,6 +1988,10 @@ function sleepAgent(id: string, reason: 'idle' | 'memory' | 'user'): { ok: true 
   config.sleeping = true
   config.sleptAt = new Date().toISOString()
   killPty(managed)
+  // Config files are per agent id: remove them now, not in the async onExit,
+  // which could otherwise delete the files a quick wake just wrote.
+  if (config.cli === 'pi') cleanupPiAgentDir(piAgentDir(id))
+  else if (managed.mcpConfigPath) cleanupConfig(managed.mcpConfigPath)
   agents.delete(id)
   persistAgentConfig(config)
   hubForConfig(config).registry.markSleeping(config.name, config.sleptAt)
@@ -2004,12 +2015,46 @@ function findRosterConfig(id: string): AgentConfig | undefined {
   return undefined
 }
 
+// Sleeping roster row matching an id or (case-insensitive) name, in any live context.
+function findSleepingConfig(nameOrId: string): AgentConfig | undefined {
+  const lower = nameOrId.toLowerCase()
+  for (const wsId of contextRegistry.ids()) {
+    const cfg = contextRegistry.get(wsId)?.stores.roster.list()
+      .find(c => c.sleeping === true && (c.id === nameOrId || c.name.toLowerCase() === lower))
+    if (cfg) return cfg
+  }
+  return undefined
+}
+
+// teardownAgent for a sleeper (no PTY): drop roster row, registry entry,
+// queued nudges and frozen output, and release its worktree.
+function teardownSleepingAgent(cfg: AgentConfig): void {
+  const { id, name } = cfg
+  const ctx = contextRegistry.resolveForSpawn(cfg.tabId)
+  const h = ctx?.hub ?? hub
+  ctx?.stores.roster.remove(id)
+  h.registry.remove(name)
+  h.messages.clearAgent(name)
+  pendingNudges.delete(name)
+  lastNudgeDelivery.delete(name)
+  const fallbackTimer = nudgeFallbackTimers.get(name)
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer)
+    nudgeFallbackTimers.delete(name)
+  }
+  sleepingOutput.delete(id)
+  if (cfg.worktreePath) releaseWorktreeWithNotes(cfg, cfg.projectRoot ?? cfg.cwd)
+  mainWindow?.webContents.send(IPC.AGENT_CLOSED_REMOTE, { agentId: id })
+  mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+}
+
 // Bring a sleeping agent back: resume its session (or start it for the first
 // time when it was spawned asleep). On failure it stays asleep with a note.
 function wakeAgent(id: string, reason: 'task' | 'user' | 'schedule'): { ok: true } | { ok: false; error: string } {
   if (agents.has(id)) return { ok: true }
   const cfg = findRosterConfig(id)
   if (!cfg) return { ok: false, error: 'Agent not found' }
+  if (!cfg.sleeping) return { ok: false, error: 'Agent is not asleep' }
   const h = hubForConfig(cfg)
   const sleptAt = cfg.sleptAt ?? new Date().toISOString()
   h.registry.markWaking(cfg.name)
@@ -2636,8 +2681,10 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
       const managed = [...agents.values()].find(
         m => m.config.id === nameOrId || m.config.name.toLowerCase() === nameOrId.toLowerCase()
       )
-      if (!managed) return { ok: false }
-      teardownAgent(managed)
+      if (managed) { teardownAgent(managed); return { ok: true } }
+      const sleeper = findSleepingConfig(nameOrId)
+      if (!sleeper) return { ok: false }
+      teardownSleepingAgent(sleeper)
       return { ok: true }
     }
   }
@@ -2922,7 +2969,7 @@ function setupIPC(): void {
   // Respawn an agent with a new config — kills the old PTY, wipes history, spawns fresh
   ipcMain.handle(IPC.AGENT_RESPAWN, async (_event, agentId: string, newConfigInput: Omit<AgentConfig, 'id'>): Promise<RespawnResult> => {
     const managed = agents.get(agentId)
-    if (!managed) return { ok: false, error: 'AGENT_NOT_FOUND' }
+    if (!managed) return { ok: false, error: findRosterConfig(agentId)?.sleeping ? 'AGENT_ASLEEP' : 'AGENT_NOT_FOUND' }
 
     const currentConfig = managed.config
     const otherAgentNames = hub.registry.list().map(a => a.name)
@@ -3004,7 +3051,9 @@ function setupIPC(): void {
 
   ipcMain.handle(IPC.KILL_AGENT, (_event, agentId: string) => {
     const managed = agents.get(agentId)
-    if (managed) teardownAgent(managed)
+    if (managed) { teardownAgent(managed); return }
+    const sleeper = findSleepingConfig(agentId)
+    if (sleeper) teardownSleepingAgent(sleeper)
   })
 
   ipcMain.handle(IPC.AGENT_SLEEP, (_event, agentId: string) => sleepAgent(agentId, 'user'))

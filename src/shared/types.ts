@@ -638,7 +638,7 @@ export type ScheduleStatus = 'active' | 'paused' | 'stopped' | 'expired'
 
 export type RespawnResult =
   | { ok: true }
-  | { ok: false; error: 'AGENT_NOT_FOUND' | 'NAME_TAKEN' | 'CWD_MISSING' | 'INTERNAL'; message?: string }
+  | { ok: false; error: 'AGENT_NOT_FOUND' | 'AGENT_ASLEEP' | 'NAME_TAKEN' | 'CWD_MISSING' | 'INTERNAL'; message?: string }
 
 export interface ScheduledPrompt {
   id: string
