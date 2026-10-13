@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { nextSpawnBounds } from '../window-layout'
+import { clampZoom, fitViewport, type Viewport } from '../canvas-math'
 
 export interface WindowState {
   id: string
@@ -25,9 +26,12 @@ export function useWindowManager() {
   // Refs for stable closures (addWindow needs current zoom/pan without recreating)
   const zoomRef = useRef(1.0)
   const panRef = useRef({ x: 0, y: 0 })
+  // Size of the canvas viewport element (reported by Workspace). Used to centre
+  // spawns on the visible canvas rather than on the whole BrowserWindow.
+  const viewportSizeRef = useRef({ width: window.innerWidth, height: window.innerHeight })
 
   const setZoom = useCallback((level: number) => {
-    const clamped = Math.min(2.0, Math.max(0.25, level))
+    const clamped = clampZoom(level)
     zoomRef.current = clamped
     setZoomState(clamped)
   }, [])
@@ -35,6 +39,19 @@ export function useWindowManager() {
   const setPan = useCallback((x: number, y: number) => {
     panRef.current = { x, y }
     setPanState({ x, y })
+  }, [])
+
+  /** Apply a whole viewport at once (restoring a tab's saved view). */
+  const applyViewport = useCallback((vp: Viewport) => {
+    const clamped = clampZoom(vp.zoom)
+    zoomRef.current = clamped
+    panRef.current = { x: vp.panX, y: vp.panY }
+    setZoomState(clamped)
+    setPanState(panRef.current)
+  }, [])
+
+  const setViewportSize = useCallback((width: number, height: number) => {
+    if (width > 0 && height > 0) viewportSizeRef.current = { width, height }
   }, [])
 
   const updateWindowPosition = useCallback((id: string, x: number, y: number) => {
@@ -61,35 +78,15 @@ export function useWindowManager() {
     setWindows(prev => {
       let wins = Array.from(prev.values())
       if (tabId) wins = wins.filter(w => w.tabId === tabId)
-      if (wins.length === 0) return prev
+      wins = wins.filter(w => !w.minimized)
 
-      const padding = 60
-      const minX = Math.min(...wins.map(w => w.x))
-      const minY = Math.min(...wins.map(w => w.y))
-      const maxX = Math.max(...wins.map(w => w.x + w.width))
-      const maxY = Math.max(...wins.map(w => w.y + w.height))
-
-      const bboxWidth = maxX - minX
-      const bboxHeight = maxY - minY
-
-      const newZoom = Math.min(
-        2.0,
-        Math.max(0.25, Math.min(
-          viewportWidth / (bboxWidth + padding),
-          viewportHeight / (bboxHeight + padding)
-        ))
-      )
-
-      const centerX = (minX + maxX) / 2
-      const centerY = (minY + maxY) / 2
-
-      zoomRef.current = newZoom
-      panRef.current = {
-        x: viewportWidth / 2 - centerX * newZoom,
-        y: viewportHeight / 2 - centerY * newZoom
+      const vp = fitViewport(wins, viewportWidth, viewportHeight)
+      if (vp) {
+        zoomRef.current = vp.zoom
+        panRef.current = { x: vp.panX, y: vp.panY }
+        setZoomState(vp.zoom)
+        setPanState(panRef.current)
       }
-      setZoomState(newZoom)
-      setPanState(panRef.current)
 
       return prev // don't modify windows, just read them
     })
@@ -104,8 +101,9 @@ export function useWindowManager() {
       const p = panRef.current
       // Base point (used only when the tab is empty): the canvas coord at the
       // viewport centre, offset so the window is roughly centred.
-      const baseX = (window.innerWidth / 2 - p.x) / z - 300
-      const baseY = (window.innerHeight / 2 - p.y) / z - 200
+      const vs = viewportSizeRef.current
+      const baseX = (vs.width / 2 - p.x) / z - 300
+      const baseY = (vs.height / 2 - p.y) / z - 200
       // Tile to the right of existing windows instead of stacking on top.
       const b = nextSpawnBounds(
         tabWins.map(w => ({ x: w.x, y: w.y, width: w.width, height: w.height })),
@@ -191,6 +189,8 @@ export function useWindowManager() {
     pan,
     setZoom,
     setPan,
+    applyViewport,
+    setViewportSize,
     addWindow,
     addWindowAt,
     removeWindow,
