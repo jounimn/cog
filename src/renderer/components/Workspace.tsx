@@ -19,6 +19,7 @@ import { ZoomControls } from './ZoomControls'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import type { SnapBounds, SnapZoneInfo, WindowBounds } from '../hooks/useSnapZones'
+import { clientToCanvas } from '../canvas-math'
 
 const PANEL_IDS: Record<string, string> = {
   '__pinboard__': 'pinboard',
@@ -70,6 +71,10 @@ interface WorkspaceProps {
   onResizeStop: (id: string, x: number, y: number, width: number, height: number) => void
   activeTabId?: string
   onEditAgent?: (agentId: string) => void
+  /** Reports the canvas viewport's size so spawns centre on the visible area. */
+  onViewportResize?: (width: number, height: number) => void
+  /** Bump to ask the workspace to zoom-to-fit (used after a tab switch). */
+  fitRequest?: number
 }
 
 export function Workspace({
@@ -91,7 +96,9 @@ export function Workspace({
   onDragStop,
   onResizeStop,
   activeTabId,
-  onEditAgent
+  onEditAgent,
+  onViewportResize,
+  fitRequest
 }: WorkspaceProps): React.ReactElement {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [isPanning, setIsPanning] = useState(false)
@@ -200,6 +207,7 @@ export function Workspace({
         width: el.clientWidth,
         height: el.clientHeight
       })
+      onViewportResize?.(el.clientWidth, el.clientHeight)
     }
 
     updateSize()
@@ -207,7 +215,7 @@ export function Workspace({
     const observer = new ResizeObserver(updateSize)
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [onViewportResize])
 
   // Use refs for zoom/pan so the native wheel handler stays current
   const zoomRef = useRef(zoom)
@@ -302,19 +310,28 @@ export function Workspace({
     setSnapPreview(null)
   }, [onResizeStop])
 
+  // The link preview is drawn by LinkOverlay INSIDE the transformed canvas, so
+  // mouse positions must be converted from screen to canvas space or the line
+  // lands wherever pan/zoom shifts it.
+  const toCanvas = useCallback((clientX: number, clientY: number) => {
+    const rect = viewportRef.current?.getBoundingClientRect() ?? { left: 0, top: 0 }
+    return clientToCanvas(clientX, clientY, rect, panRef.current, zoomRef.current)
+  }, [])
+
   const handleLinkDragStart = useCallback((agentName: string, e: React.MouseEvent) => {
     e.stopPropagation()
     e.preventDefault()
+    const p = toCanvas(e.clientX, e.clientY)
     setLinkDrawing(true)
     setLinkFromAgent(agentName)
-    setLinkFromPos({ x: e.clientX, y: e.clientY })
-    setLinkMousePos({ x: e.clientX, y: e.clientY })
-  }, [])
+    setLinkFromPos(p)
+    setLinkMousePos(p)
+  }, [toCanvas])
 
   useEffect(() => {
     if (!linkDrawing) return
     const handleMove = (e: MouseEvent) => {
-      setLinkMousePos({ x: e.clientX, y: e.clientY })
+      setLinkMousePos(toCanvas(e.clientX, e.clientY))
     }
     const handleUp = (e: MouseEvent) => {
       setLinkDrawing(false)
@@ -337,7 +354,7 @@ export function Workspace({
       window.removeEventListener('mousemove', handleMove)
       window.removeEventListener('mouseup', handleUp)
     }
-  }, [linkDrawing, linkFromAgent, onAddLink])
+  }, [linkDrawing, linkFromAgent, onAddLink, toCanvas])
 
   const handleFitAll = useCallback(() => {
     if (!viewportRef.current) return
@@ -346,6 +363,12 @@ export function Workspace({
     onZoomToFit(rect.width, rect.height)
     setTimeout(() => setTransitionEnabled(false), 300)
   }, [onZoomToFit])
+
+  // App asks for a fit after landing on a tab with no remembered viewport.
+  useEffect(() => {
+    if (fitRequest) handleFitAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitRequest])
 
   const handleReset = useCallback(() => {
     setTransitionEnabled(true)

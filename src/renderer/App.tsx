@@ -9,6 +9,8 @@ import { HelpDialog } from './components/HelpDialog'
 import { ProjectPickerDialog } from './components/ProjectPickerDialog'
 import { useWindowManager } from './hooks/useWindowManager'
 import { loadWindowBounds, saveWindowBounds, deleteWindowBounds } from './window-layout'
+import { viewportStore } from './viewport-store'
+import { terminalRegistry } from './components/TerminalWindow'
 import { useAgents } from './hooks/useAgents'
 import { UpdateNotice } from './components/UpdateNotice'
 import { WhatsNewDialog } from './components/WhatsNewDialog'
@@ -68,7 +70,8 @@ export function App(): React.ReactElement {
   const {
     windows, zoom, pan,
     addWindow, addWindowAt, removeWindow, focusWindow, minimizeWindow,
-    setZoom, setPan, updateWindowPosition, updateWindowSize, zoomToFit
+    setZoom, setPan, applyViewport, setViewportSize,
+    updateWindowPosition, updateWindowSize, zoomToFit
   } = useWindowManager()
   const { agents, spawnAgent, killAgent, getStatusColor } = useAgents()
 
@@ -84,6 +87,68 @@ export function App(): React.ReactElement {
 
   // Filter windows to only those belonging to the active tab
   const tabWindows = windows.filter(w => w.tabId === activeTabId)
+
+  // ── Per-tab viewport ───────────────────────────────────────────────────────
+  // Each tab lays its windows out in its own region of the canvas, so the view
+  // must follow the tab: restore the remembered viewport on switch, or fit the
+  // tab's windows when nothing is remembered yet (first visit, fresh install).
+  const latestViewport = React.useRef({ zoom, pan })
+  latestViewport.current = { zoom, pan }
+  const [autoFitTab, setAutoFitTab] = useState<string | null>(null)
+  const [fitRequest, setFitRequest] = useState(0)
+
+  useEffect(() => {
+    const saved = viewportStore.load(activeTabId)
+    if (saved) {
+      applyViewport(saved)
+      setAutoFitTab(null)
+    } else {
+      setAutoFitTab(activeTabId)
+    }
+    return () => {
+      // Leaving this tab: remember where it was left.
+      const { zoom: z, pan: p } = latestViewport.current
+      viewportStore.save(activeTabId, { zoom: z, panX: p.x, panY: p.y })
+    }
+  }, [activeTabId, applyViewport])
+
+  // Keep the active tab's viewport persisted as the user pans/zooms (debounced)
+  // so a relaunch lands on the same view.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      viewportStore.save(activeTabId, { zoom, panX: pan.x, panY: pan.y })
+    }, 400)
+    return () => clearTimeout(t)
+  }, [activeTabId, zoom, pan])
+
+  // Fit as soon as the tab has windows, and again as more arrive (lazy respawn
+  // adds them one by one) — until the user pans or zooms by hand.
+  const tabWindowCount = tabWindows.filter(w => !w.minimized).length
+  useEffect(() => {
+    if (autoFitTab !== activeTabId || tabWindowCount === 0) return
+    setFitRequest(n => n + 1)
+  }, [autoFitTab, activeTabId, tabWindowCount])
+
+  const userSetZoom = useCallback((level: number) => {
+    setAutoFitTab(null)
+    setZoom(level)
+  }, [setZoom])
+  const userSetPan = useCallback((x: number, y: number) => {
+    setAutoFitTab(null)
+    setPan(x, y)
+  }, [setPan])
+
+  // Terminals outlive their React components (tab switches unmount them) and
+  // are torn down here, once the agent's window is actually gone — closed,
+  // killed remotely, or removed with its tab.
+  const knownWindowIds = React.useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const current = new Set(windows.map(w => w.id))
+    for (const id of knownWindowIds.current) {
+      if (!current.has(id)) terminalRegistry.dispose(id)
+    }
+    knownWindowIds.current = current
+  }, [windows])
 
   const pinboardOpen = tabWindows.some(w => w.id === panelIdForTab(PINBOARD_ID, activeTabId))
   const infoOpen = tabWindows.some(w => w.id === panelIdForTab(INFO_ID, activeTabId))
@@ -180,6 +245,7 @@ export function App(): React.ReactElement {
   const handleCloseTab = useCallback(async (tabId: string) => {
     if (tabs.length <= 1) return
     await window.electronAPI.closeTab(tabId)
+    viewportStore.remove(tabId)
     setTabs(prev => prev.filter(t => t.id !== tabId))
     if (activeTabId === tabId) {
       const remaining = tabs.filter(t => t.id !== tabId)
@@ -282,12 +348,14 @@ export function App(): React.ReactElement {
     if (boardOpen) { removeWindow(id) } else { addWindow(id, '📖 Sketchpad', undefined, activeTabId) }
   }, [boardOpen, addWindow, removeWindow, activeTabId])
 
-  // Load links & groups when project changes
+  // Load links & groups when the project OR the active tab changes — each
+  // workspace tab has its own hub (and group manager), so the previous tab's
+  // links are stale the moment we switch.
   useEffect(() => {
     if (!project) return
     window.electronAPI.getLinks().then(setLinks)
     window.electronAPI.getGroups().then(setGroups)
-  }, [project])
+  }, [project, activeTabId])
 
   // Listen for team proposals: surface modal as soon as the orchestrator submits.
   // On startup, also pull any pending proposals that landed before the renderer
@@ -443,8 +511,8 @@ export function App(): React.ReactElement {
       }
       // Ctrl+0 = reset zoom
       if (e.ctrlKey && e.key === '0' && !e.shiftKey) {
-        setZoom(1.0)
-        setPan(0, 0)
+        userSetZoom(1.0)
+        userSetPan(0, 0)
         e.preventDefault()
       }
       // Ctrl+Shift+0 = fit all
@@ -455,7 +523,7 @@ export function App(): React.ReactElement {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [tabWindows, focusWindow, setZoom, setPan, zoomToFit, activeTabId])
+  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId])
 
   useEffect(() => {
     electronAPI.getProject().then((p: RecentProject | null) => {
@@ -682,9 +750,11 @@ export function App(): React.ReactElement {
             groups={groups}
             onAddLink={handleAddLink}
             onRemoveLink={handleRemoveLink}
-            onSetZoom={setZoom}
-            onSetPan={setPan}
+            onSetZoom={userSetZoom}
+            onSetPan={userSetPan}
             onZoomToFit={(w, h) => zoomToFit(w, h, activeTabId)}
+            onViewportResize={setViewportSize}
+            fitRequest={fitRequest}
             onFocusWindow={focusWindow}
             onMinimizeWindow={minimizeWindow}
             onCloseWindow={handleClose}
