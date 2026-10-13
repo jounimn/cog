@@ -1387,6 +1387,32 @@ function postWorktreeNote(config: AgentConfig, text: string): void {
   } catch { /* inbox unavailable */ }
 }
 
+// ensureWorkDir that never throws: on failure (read-only / missing project
+// folder) leave workDir undefined, tell the agent, and let the spawn continue.
+function safeEnsureWorkDir(config: AgentConfig, projectRoot: string): string | undefined {
+  try {
+    return ensureWorkDir(projectRoot, config.name)
+  } catch (err: any) {
+    postWorktreeNote(config, `"${config.name}": could not create the work dir under .cog/work: ${err?.message ?? String(err)}`)
+    return undefined
+  }
+}
+
+// Release an agent's worktree after its PTY is gone; keep it (with an inbox
+// note) when dirty or on git errors. Never throws.
+function releaseWorktreeWithNotes(config: AgentConfig, projectRoot: string): void {
+  try {
+    const rel = releaseAgentWorktree(projectRoot, config.name)
+    if (rel.reason === 'dirty') {
+      postWorktreeNote(config, `Worktree of "${config.name}" kept at ${rel.path}: uncommitted changes.`)
+    } else if (rel.reason === 'git-error') {
+      postWorktreeNote(config, `Worktree of "${config.name}" kept at ${rel.path}: ${rel.detail}`)
+    }
+  } catch (err) {
+    console.error(`[worktree] release failed for ${config.name}:`, err)
+  }
+}
+
 function buildMcpEnv(config: AgentConfig, projectRoot: string): Record<string, string> {
   const h = hubForConfig(config)
   const env: Record<string, string> = {
@@ -1612,6 +1638,15 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
   const wsPath = config.tabId ? workspaceManager?.projectPathFor(config.tabId) : null
   if (wsPath) config.cwd = wsPath
 
+  // Real project folder (never the worktree). Persisted on the config so a
+  // respawn, whose cwd may already be the worktree, still finds the root.
+  const projectRoot = wsPath
+    ?? config.projectRoot
+    ?? ((config.worktreePath && config.cwd === config.worktreePath)
+      ? path.resolve(config.worktreePath, '..', '..', '..')
+      : config.cwd)
+  config.projectRoot = projectRoot
+
   // Agents share a project's .cog/ folders by slug, so two names that slug the
   // same would collide on one worktree/work dir.
   const slug = agentSlug(config.name)
@@ -1620,23 +1655,22 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
   )
   if (slugClash) throw new Error(`Agent slug "${slug}" already in use in this project`)
 
-  // Real project folder, captured BEFORE cwd may be switched to the worktree.
-  const projectRoot = config.cwd
   const wantsWorktree = (config.worktree ?? defaultWorktreeForRole(config.role, config.cli)) && config.cli !== 'terminal'
   if (wantsWorktree) {
     let r: ReturnType<typeof ensureAgentWorktree>
     try {
       r = ensureAgentWorktree(projectRoot, config.name)
     } catch (err: any) {
-      r = { ok: false, reason: 'git-error', detail: err?.message ?? String(err), workDir: ensureWorkDir(projectRoot, config.name) }
+      r = { ok: false, reason: 'git-error', detail: err?.message ?? String(err), workDir: safeEnsureWorkDir(config, projectRoot) as string }
     }
-    config.workDir = r.workDir
+    config.workDir = r.workDir || undefined
     if (r.ok) {
       config.worktreePath = r.path
       config.cwd = r.path
       if (r.staleRenamedTo) postWorktreeNote(config, `Old worktree folder renamed to ${r.staleRenamedTo}`)
     } else {
       config.worktreePath = undefined
+      config.cwd = projectRoot
       const head = `"${config.name}" spawned in the project folder: `
       const why =
         r.reason === 'not-git' ? 'it is not a git repository, so no worktree was created.'
@@ -1646,7 +1680,7 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
       postWorktreeNote(config, head + why)
     }
   } else {
-    config.workDir = ensureWorkDir(projectRoot, config.name)
+    config.workDir = safeEnsureWorkDir(config, projectRoot)
     config.worktreePath = undefined
   }
 
@@ -1840,18 +1874,7 @@ function teardownAgent(managed: ManagedPty): void {
   manualKills.add(id) // Prevent auto-reconnect
   cancelSessionDiscovery(id)
   killPty(managed)
-  if (managed.config.worktreePath) {
-    try {
-      const rel = releaseAgentWorktree(managed.projectRoot, name)
-      if (rel.reason === 'dirty') {
-        postWorktreeNote(managed.config, `Worktree of "${name}" kept at ${rel.path}: uncommitted changes.`)
-      } else if (rel.reason === 'git-error') {
-        postWorktreeNote(managed.config, `Worktree of "${name}" kept at ${rel.path}: ${rel.detail}`)
-      }
-    } catch (err) {
-      console.error(`[worktree] release failed for ${name}:`, err)
-    }
-  }
+  if (managed.config.worktreePath) releaseWorktreeWithNotes(managed.config, managed.projectRoot)
   // Target the agent's OWN context (Stage 4): its registry entry + roster live
   // on that workspace's hub/DB, not whichever is active.
   const ctx = contextRegistry.resolveForSpawn(managed.config.tabId)
@@ -2783,6 +2806,11 @@ function setupIPC(): void {
     managed.mcpConfigPath = null
     cancelSessionDiscovery(agentId)
     killPty(managed)
+    // A rename changes the slug, so the new spawn gets a new worktree; release
+    // the old one. Same slug: the new spawn reuses it.
+    if (currentConfig.worktreePath && agentSlug(newConfigInput.name.trim()) !== agentSlug(currentConfig.name)) {
+      releaseWorktreeWithNotes(currentConfig, managed.projectRoot)
+    }
 
     // Wipe history under old name
     try { hub.registry.remove(oldName) } catch { /* ignore */ }
@@ -2800,6 +2828,11 @@ function setupIPC(): void {
       ...newConfigInput,
       name: newName,
       id: agentId,
+      // Keep the project root / worktree link so the spawn does not mistake the
+      // worktree for the project (only when the folder was not changed).
+      ...(newConfigInput.cwd === currentConfig.cwd
+        ? { projectRoot: managed.projectRoot, worktreePath: currentConfig.worktreePath }
+        : {}),
       // History wipe: never carry the old session into the new config.
       sessionId: undefined,
       sessionStarted: undefined,

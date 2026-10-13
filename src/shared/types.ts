@@ -61,6 +61,7 @@ export interface AgentConfig {
   sessionStarted?: boolean
   worktree?: boolean  // user choice: run this agent in its own git worktree
   worktreePath?: string  // derived at spawn: absolute path of the worktree checkout
+  projectRoot?: string  // derived at spawn: the workspace folder, never the worktree
   workDir?: string  // derived at spawn: directory the CLI actually runs in (worktree or cwd)
 }
 
