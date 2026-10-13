@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { AutonomySettings } from './AutonomySettings'
 import QRCode from 'qrcode-svg'
-import type { AgentState, WorkspaceTheme, CommunityThemeListItem, CommunityTheme, AgentTheme, TelegramStatus, TelegramTopicsStatus, NotificationThreshold } from '../../shared/types'
+import type { SleepSettings, AgentState, WorkspaceTheme, CommunityThemeListItem, CommunityTheme, AgentTheme, TelegramStatus, TelegramTopicsStatus, NotificationThreshold } from '../../shared/types'
 import { ROLE_THEME_DEFAULTS, getPresetById, THEME_PRESETS, WORKSPACE_THEMES, getWorkspaceThemeById } from '../themes'
 
 declare const electronAPI: {
@@ -30,10 +30,12 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
   const [customThemes, setCustomThemes] = useState<WorkspaceTheme[]>([])
   const [customThemeName, setCustomThemeName] = useState('')
   const [showSaveCustom, setShowSaveCustom] = useState(false)
+  const [sleepSettings, setSleepSettings] = useState<SleepSettings | null>(null)
 
   useEffect(() => {
     window.electronAPI.getActiveWorkspaceTheme().then(setActiveWsThemeId)
     window.electronAPI.listCustomWorkspaceThemes().then(setCustomThemes)
+    window.electronAPI.sleepSettingsGet().then(setSleepSettings)
   }, [])
 
   const allThemes = useMemo(() => [...WORKSPACE_THEMES, ...customThemes], [customThemes])
@@ -430,6 +432,47 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
               <option value="none">Don&apos;t respawn</option>
             </select>
           </label>
+
+          <div style={{ fontSize: '12px', color: '#888', marginTop: 4 }}>Agent sleep (this workspace)</div>
+          {sleepSettings && (['enabled'] as const).map(() => (
+            <label key="sleep-enabled" style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
+            }}>
+              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Put idle agents to sleep</div>
+              <input
+                type="checkbox"
+                checked={sleepSettings.enabled}
+                onChange={async (e) => setSleepSettings(await window.electronAPI.sleepSettingsSet({ enabled: e.target.checked }))}
+              />
+            </label>
+          ))}
+          {sleepSettings && ([
+            { key: 'sleepAfterMinutes', label: 'Sleep after (minutes idle)' },
+            { key: 'memoryFloorMb', label: 'Memory floor (MB)' }
+          ] as const).map(({ key, label }) => (
+            <label key={key} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
+            }}>
+              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>{label}</div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={sleepSettings[key]}
+                onChange={async (e) => {
+                  const n = Math.floor(Number(e.target.value))
+                  if (!Number.isFinite(n) || n < 0) return
+                  setSleepSettings(await window.electronAPI.sleepSettingsSet({ [key]: n }))
+                }}
+                style={{
+                  width: 90, backgroundColor: '#1a1a1a', color: '#e0e0e0',
+                  border: '1px solid #333', borderRadius: 4, padding: '6px 8px', fontSize: 12
+                }}
+              />
+            </label>
+          ))}
         </div>
 
         {/* Workspace Themes section */}

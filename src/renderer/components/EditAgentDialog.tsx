@@ -46,6 +46,8 @@ function configToFormValue(agent: AgentConfig): AgentConfigFormValue {
     showAdvanced: !!agent.promptRegex,
     worktree: agent.worktree ?? defaultWorktreeForRole(agent.role, agent.cli),
     worktreeTouched: agent.worktree !== undefined,
+    spawnAsleep: agent.spawnAsleep ?? false,
+    neverSleep: agent.neverSleep ?? false,
   }
 }
 
@@ -85,6 +87,7 @@ export function EditAgentDialog({ agent, onClose }: EditAgentDialogProps): React
         const next: Partial<Record<keyof AgentConfigFormValue, string>> = {}
         if (result.error === 'NAME_TAKEN') next.name = 'An agent with this name already exists'
         else if (result.error === 'CWD_MISSING') next.cwd = 'Directory does not exist'
+        else if (result.error === 'AGENT_ASLEEP') next.name = 'Wake the agent before editing it'
         else next.name = result.message ?? 'Could not respawn agent'
         setErrors(next)
       }

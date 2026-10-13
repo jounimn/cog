@@ -688,7 +688,9 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
             promptRegex: a.promptRegex,
             model: a.model,
             experimental: a.experimental,
-            worktree: a.worktree
+            worktree: a.worktree,
+            spawnAsleep: a.spawnAsleep,
+            neverSleep: a.neverSleep
           }))
 
       await window.electronAPI.savePreset(presetName.trim(), agentConfigs, windowPositions, canvas)
@@ -804,7 +806,9 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
         promptRegex: a.promptRegex,
         model: a.model,
         experimental: a.experimental,
-        worktree: a.worktree
+        worktree: a.worktree,
+        spawnAsleep: a.spawnAsleep,
+        neverSleep: a.neverSleep
       }))
 
       await window.electronAPI.savePreset(name, agentConfigs, windowPositions, canvas)

@@ -2,7 +2,8 @@ import React, { useCallback, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Rnd, type DraggableData, type RndDragEvent } from 'react-rnd'
 import { getSnapZone, getWindowSnap, type SnapBounds, type SnapZoneInfo, type WindowBounds } from '../hooks/useSnapZones'
-import type { AgentTheme } from '../../shared/types'
+import type { AgentTheme, AgentStatus } from '../../shared/types'
+import { cardPresentation } from '../sleep-ui'
 import { THEME_PRESETS, resolveTheme } from '../themes'
 
 interface FloatingWindowProps {
@@ -49,6 +50,9 @@ interface FloatingWindowProps {
     closeMenu: () => void
   ) => React.ReactNode | null
   onEditAgent?: (agentId: string) => void
+  status?: AgentStatus
+  onSleepAgent?: (agentId: string) => void
+  onWakeAgent?: (agentId: string) => void
   children: React.ReactNode
 }
 
@@ -85,6 +89,9 @@ export function FloatingWindow({
   agentId,
   onTitleBarContextMenu,
   onEditAgent,
+  status,
+  onSleepAgent,
+  onWakeAgent,
   children
 }: FloatingWindowProps): React.ReactElement | null {
   const [dragSizeOverride, setDragSizeOverride] = useState<{ width: number; height: number } | null>(null)
@@ -232,8 +239,10 @@ export function FloatingWindow({
   // Minimized: hide but keep hooks alive (React requires consistent hook count)
   if (minimized) return null
 
+  const presentation = cardPresentation(status ?? 'idle')
   const themedWindowStyle: React.CSSProperties = {
     ...windowStyle,
+    opacity: presentation.opacity,
     border: `1px solid ${resolvedTheme.border}`,
     backgroundColor: resolvedTheme.bg
   }
@@ -253,17 +262,17 @@ export function FloatingWindow({
         <div
           className="window-titlebar"
           style={themedTitleBarStyle}
-          onDoubleClick={onMaximize}
+          onDoubleClick={status === 'sleeping' && onWakeAgent && agentId ? () => onWakeAgent(agentId) : onMaximize}
           onContextMenu={openContextMenu}
         >
           {statusColor && <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: statusColor, marginRight: 8 }} />}
-          <span style={{ flex: 1, fontSize: '12px', color: '#ccc' }}>{title}</span>
+          <span style={{ flex: 1, fontSize: '12px', color: '#ccc' }}>{presentation.titlePrefix}{title}</span>
           <button onMouseDown={e => e.stopPropagation()} onClick={onMinimize} style={btnStyle}>─</button>
           <button onMouseDown={e => e.stopPropagation()} onClick={onMaximize} style={btnStyle}>❐</button>
           <button onMouseDown={e => e.stopPropagation()} onClick={onClose} style={{ ...btnStyle, color: '#e55' }}>✕</button>
         </div>
         <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>
-        {themeMenu && <ThemeMenu x={themeMenu.x} y={themeMenu.y} theme={theme} onClose={() => setThemeMenu(null)} onApplyPreset={applyPreset} onChangeField={updateThemeField} onEdit={onEditAgent && agentId ? () => onEditAgent(agentId) : undefined} />}
+        {themeMenu && <ThemeMenu x={themeMenu.x} y={themeMenu.y} theme={theme} onClose={() => setThemeMenu(null)} onApplyPreset={applyPreset} onChangeField={updateThemeField} onEdit={onEditAgent && agentId ? () => onEditAgent(agentId) : undefined} menu={presentation.menu} onSleep={onSleepAgent && agentId ? () => onSleepAgent(agentId) : undefined} onWake={onWakeAgent && agentId ? () => onWakeAgent(agentId) : undefined} />}
         {customMenu}
       </div>,
       viewportRef.current
@@ -289,11 +298,11 @@ export function FloatingWindow({
         <div
           className="window-titlebar"
           style={themedTitleBarStyle}
-          onDoubleClick={onMaximize}
+          onDoubleClick={status === 'sleeping' && onWakeAgent && agentId ? () => onWakeAgent(agentId) : onMaximize}
           onContextMenu={openContextMenu}
         >
           {statusColor && <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: statusColor, marginRight: 8 }} />}
-          <span style={{ flex: 1, fontSize: '12px', color: '#ccc' }}>{title}</span>
+          <span style={{ flex: 1, fontSize: '12px', color: '#ccc' }}>{presentation.titlePrefix}{title}</span>
           <button onMouseDown={e => e.stopPropagation()} onClick={onMinimize} style={btnStyle}>─</button>
           <button onMouseDown={e => e.stopPropagation()} onClick={onMaximize} style={btnStyle}>□</button>
           <button onMouseDown={e => e.stopPropagation()} onClick={onClose} style={{ ...btnStyle, color: '#e55' }}>✕</button>
@@ -321,7 +330,7 @@ export function FloatingWindow({
         )}
         <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>
       </div>
-      {themeMenu && <ThemeMenu x={themeMenu.x} y={themeMenu.y} theme={theme} onClose={() => setThemeMenu(null)} onApplyPreset={applyPreset} onChangeField={updateThemeField} onEdit={onEditAgent && agentId ? () => onEditAgent(agentId) : undefined} />}
+      {themeMenu && <ThemeMenu x={themeMenu.x} y={themeMenu.y} theme={theme} onClose={() => setThemeMenu(null)} onApplyPreset={applyPreset} onChangeField={updateThemeField} onEdit={onEditAgent && agentId ? () => onEditAgent(agentId) : undefined} menu={presentation.menu} onSleep={onSleepAgent && agentId ? () => onSleepAgent(agentId) : undefined} onWake={onWakeAgent && agentId ? () => onWakeAgent(agentId) : undefined} />}
       {customMenu}
     </Rnd>
   )
@@ -335,9 +344,12 @@ interface ThemeMenuProps {
   onApplyPreset: (theme: AgentTheme | null) => void
   onChangeField: (field: keyof AgentTheme, value: string) => void
   onEdit?: () => void
+  menu: Array<'sleep' | 'wake'>
+  onSleep?: () => void
+  onWake?: () => void
 }
 
-function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit }: ThemeMenuProps) {
+function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit, menu, onSleep, onWake }: ThemeMenuProps) {
   const resolved = resolveTheme(theme)
   const fields: { key: keyof AgentTheme; label: string }[] = [
     { key: 'chrome', label: 'Title Bar' },
@@ -419,6 +431,26 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit 
               }}
             >Edit agent…</button>
           </>
+        )}
+        {onSleep && menu.includes('sleep') && (
+          <button
+            onClick={() => { onSleep(); onClose() }}
+            style={{
+              width: '100%', padding: '6px', fontSize: '11px', marginTop: '8px',
+              background: 'transparent', border: '1px solid #444', borderRadius: '4px',
+              color: '#aaa', cursor: 'pointer', fontFamily: 'monospace'
+            }}
+          >Sleep now</button>
+        )}
+        {onWake && menu.includes('wake') && (
+          <button
+            onClick={() => { onWake(); onClose() }}
+            style={{
+              width: '100%', padding: '6px', fontSize: '11px', marginTop: '8px',
+              background: 'transparent', border: '1px solid #444', borderRadius: '4px',
+              color: '#aaa', cursor: 'pointer', fontFamily: 'monospace'
+            }}
+          >Wake</button>
         )}
       </div>
     </>,

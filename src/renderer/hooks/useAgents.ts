@@ -6,7 +6,9 @@ const STATUS_COLORS: Record<string, string> = {
   idle: '#888',
   active: '#4caf50',
   working: '#ffc107',
-  disconnected: '#f44336'
+  disconnected: '#f44336',
+  sleeping: '#5c6bc0',
+  waking: '#29b6f6'
 }
 
 export function useAgents() {

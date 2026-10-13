@@ -48,7 +48,9 @@ const STATUS_COLORS: Record<string, string> = {
   idle: '#888',
   active: '#4caf50',
   working: '#ffc107',
-  disconnected: '#f44336'
+  disconnected: '#f44336',
+  sleeping: '#5c6bc0',
+  waking: '#29b6f6'
 }
 
 interface WorkspaceProps {
@@ -71,6 +73,8 @@ interface WorkspaceProps {
   onResizeStop: (id: string, x: number, y: number, width: number, height: number) => void
   activeTabId?: string
   onEditAgent?: (agentId: string) => void
+  onSleepAgent?: (agentId: string) => void
+  onWakeAgent?: (agentId: string) => void
   /** Reports the canvas viewport's size so spawns centre on the visible area. */
   onViewportResize?: (width: number, height: number) => void
   /** Bump to ask the workspace to zoom-to-fit (used after a tab switch). */
@@ -97,6 +101,8 @@ export function Workspace({
   onResizeStop,
   activeTabId,
   onEditAgent,
+  onSleepAgent,
+  onWakeAgent,
   onViewportResize,
   fitRequest
 }: WorkspaceProps): React.ReactElement {
@@ -495,6 +501,9 @@ export function Workspace({
                 theme={agent?.theme}
                 agentId={agent?.id}
                 onEditAgent={agent && agent.cli !== 'terminal' ? onEditAgent : undefined}
+                status={agent?.status}
+                onSleepAgent={agent ? onSleepAgent : undefined}
+                onWakeAgent={agent ? onWakeAgent : undefined}
                 onTitleBarContextMenu={
                   panelType === 'trollbox'
                     ? (event, closeMenu) => (

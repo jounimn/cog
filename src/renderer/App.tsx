@@ -765,6 +765,8 @@ export function App(): React.ReactElement {
             }}
             activeTabId={activeTabId}
             onEditAgent={(id) => setEditingAgentId(id)}
+            onSleepAgent={(id) => { void window.electronAPI.sleepAgent(id) }}
+            onWakeAgent={(id) => { void window.electronAPI.wakeAgent(id) }}
           />
           {showSpawnDialog && (
             <SpawnDialog
