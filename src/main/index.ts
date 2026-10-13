@@ -57,7 +57,9 @@ import { initStreamDeck, disposeStreamDeck, resolveCogsworthDir, getStreamDeckSt
 import { prepareLocalWhisper, isLocalWhisperReady } from './streamdeck/local-whisper-prepare'
 import { buildInitialPrompt } from './agent-prompt'
 import { deriveProjectRoot } from './agent-root'
-import { canSleep } from './sleep/sleep-policy'
+import os from 'os'
+import { canSleep, type SleepCandidate } from './sleep/sleep-policy'
+import { SleepManager } from './sleep/sleep-manager'
 import { reconnectWorktreeNote, slugTakenBySleeper } from './sleep/sleep-state'
 import { routeTaskNudge, type RoutableAgent } from './sleep/wake-routing'
 import { shouldReleaseOnRespawn } from './worktree-respawn'
@@ -115,6 +117,8 @@ interface WorkspaceCtx {
   scheduleBridge: ScheduleBridge
   boardBridge: BoardBridge
   agentBridge: AgentBridge
+  /** Idle-timeout / memory-floor hibernation tick for this context's agents. */
+  sleepManager: SleepManager
 }
 /**
  * The live per-workspace contexts + which one is active. This is the pure state
@@ -1556,6 +1560,7 @@ function spawnPtyAndWire(
     },
     onStatusChange: (status) => {
       h.registry.updateStatus(config.name, status)
+      contextRegistry.resolveForSpawn(config.tabId)?.sleepManager?.noteStatus(config.id, status)
       if (contextRegistry.isActive(spawnTab)) {
         mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
         remoteWsHub?.pushStateDelta(['agents'])
@@ -1582,6 +1587,8 @@ function spawnPtyAndWire(
 
   agents.set(config.id, managed)
   if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+  // Idle time starts at spawn; the first working/active transition clears it.
+  contextRegistry.resolveForSpawn(config.tabId)?.sleepManager?.noteStatus(config.id, 'idle')
 
   const ensurePiAdapter = config.cli === 'pi' && !piAdapterEnsured
   // Resume the agent's session when Cog saw one start (crash reconnect,
@@ -2738,6 +2745,55 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
   // mode / when telegram is off (ensureTopic self-guards).
   void telegramServer?.ensureTopic(workspaceId, path.basename(projectPath))
 
+  // Hibernation tick for THIS context's agents only (matched by effective tabId).
+  const sleepManager: SleepManager = new SleepManager({
+    settings: () => sleepStore.get(),
+    candidates: () => {
+      const out: SleepCandidate[] = []
+      for (const managed of agents.values()) {
+        const c = managed.config
+        if ((c.tabId || DEFAULT_WORKSPACE_ID) !== workspaceId) continue
+        out.push({
+          id: c.id, name: c.name, role: c.role, cli: c.cli,
+          status: managed.statusDetector.status,
+          idleSince: sleepManager.idleSince(c.id),
+          sessionStarted: !!c.sessionStarted,
+          neverSleep: !!c.neverSleep,
+          worktreePath: c.worktreePath
+        })
+      }
+      return out
+    },
+    pendingNudgeNames: () => new Set(
+      [...pendingNudges.entries()].filter(([, q]) => q.length > 0).map(([name]) => name)
+    ),
+    inProgressTaskAgents: () => new Set(
+      hub.pinboard.readTasks()
+        .filter((t) => t.status === 'in_progress' && t.claimedBy)
+        .map((t) => t.claimedBy as string)
+    ),
+    promptNotInjectedIds: () => new Set(
+      [...agents.values()]
+        .filter((m) => (m.config.tabId || DEFAULT_WORKSPACE_ID) === workspaceId && !hasReceivedInitialPrompt.has(m.config.id))
+        .map((m) => m.config.id)
+    ),
+    freeMemMb: () => os.freemem() / 1048576,
+    sleep: (id, reason) => { sleepAgent(id, reason) },
+    postMemoryNote: () => {
+      try {
+        const orch = [...agents.values()].find(
+          (m) => (m.config.tabId || DEFAULT_WORKSPACE_ID) === workspaceId && (m.config.role || '').toLowerCase() === 'orchestrator'
+        )?.config
+        hub.inboxChannel.postMessage(
+          orch?.id ?? 'system', orch?.name ?? 'system',
+          'Memory below floor and every awake agent is working; nobody was put to sleep.',
+          'normal', ['sleep'], orch?.tabId ?? workspaceId
+        )
+      } catch { /* inbox unavailable */ }
+    }
+  })
+  sleepManager.start()
+
   return {
     workspaceId,
     projectPath,
@@ -2759,7 +2815,8 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
     promptScheduler,
     scheduleBridge: scheduleBridge!,
     boardBridge: boardBridge!,
-    agentBridge: agentBridge!
+    agentBridge: agentBridge!,
+    sleepManager
   }
 }
 
@@ -2927,6 +2984,7 @@ function closeCtxResources(id: string, ctx: WorkspaceCtx): void {
     agents.delete(agentId)
   }
   try { ctx.promptScheduler.stopTicker() } catch { /* noop */ }
+  ctx.sleepManager.stop()
   ctx.hub.close()
   try { ctx.db.close() } catch { /* already closed */ }
   // Clear the respawn mark so reopening this workspace respawns its roster
