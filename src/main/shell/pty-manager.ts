@@ -10,11 +10,13 @@ export interface ManagedPty {
   statusDetector: StatusDetector
   outputBuffer: OutputBuffer
   mcpConfigPath: string | null
+  projectRoot: string
 }
 
 interface SpawnOptions {
   config: AgentConfig
   mcpConfigPath: string | null
+  projectRoot: string
   extraEnv?: Record<string, string>
   onData: (data: string) => void
   onExit: (exitCode: number | undefined) => void
@@ -104,7 +106,8 @@ export function spawnAgentPty(opts: SpawnOptions): ManagedPty {
     config: opts.config,
     statusDetector,
     outputBuffer,
-    mcpConfigPath: opts.mcpConfigPath
+    mcpConfigPath: opts.mcpConfigPath,
+    projectRoot: opts.projectRoot
   }
 }
 

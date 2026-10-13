@@ -476,6 +476,7 @@ export interface ProposedAgent {
   skills?: string[]
   providerUrl?: string
   theme?: AgentTheme
+  worktree?: boolean
 }
 
 export type TeamProposalStatus = 'pending' | 'approved' | 'rejected' | 'expired'
