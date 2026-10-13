@@ -105,6 +105,7 @@ async function hubFetch(path: string, opts: RequestInit = {}): Promise<any> {
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${HUB_SECRET}`,
+      'X-Cog-Agent': AGENT_NAME,
       ...opts.headers
     }
   })
