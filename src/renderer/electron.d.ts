@@ -5,6 +5,10 @@ declare global {
     electronAPI: {
       spawnAgent: (config: AgentConfig) => Promise<{ id: string; mcpConfigPath: string }>
       killAgent: (agentId: string) => Promise<void>
+      sleepAgent: (agentId: string) => Promise<{ ok: true } | { ok: false; error: string }>
+      wakeAgent: (agentId: string) => Promise<{ ok: true } | { ok: false; error: string }>
+      sleepSettingsGet: () => Promise<import('../shared/types').SleepSettings>
+      sleepSettingsSet: (patch: Partial<import('../shared/types').SleepSettings>) => Promise<import('../shared/types').SleepSettings>
       respawnAgent: (agentId: string, newConfig: Omit<AgentConfig, 'id'>) => Promise<RespawnResult>
       getAgents: () => Promise<AgentState[]>
       getHubInfo: () => Promise<HubInfo>
