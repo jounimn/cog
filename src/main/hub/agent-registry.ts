@@ -8,7 +8,9 @@ import type { AgentConfig, AgentState, AgentStatus } from '../../shared/types'
 const ALLOWED_CONFIG_KEYS = [
   'id', 'name', 'cli', 'role', 'model', 'shell', 'cwd',
   'ceoNotes', 'admin', 'autoMode', 'tabId', 'groupId',
-  'promptRegex', 'providerUrl', 'experimental', 'skills', 'theme'
+  'promptRegex', 'providerUrl', 'experimental', 'skills', 'theme',
+  'sleeping', 'sleptAt', 'spawnAsleep', 'neverSleep',
+  'worktree', 'worktreePath', 'projectRoot', 'workDir'
 ] as const
 
 function copyConfigFields(src: AgentConfig, dst: AgentState): void {
@@ -35,12 +37,12 @@ export class AgentRegistry extends EventEmitter {
       // pick any key present on AgentState (status, createdAt, __proto__, etc.)
       // and clobber server-managed runtime state.
       copyConfigFields(config, existing)
-      existing.status = 'idle'
+      existing.status = config.sleeping === true ? 'sleeping' : 'idle'
       this.emit('status', { name: existing.name, status: existing.status })
       return existing
     }
     const state: AgentState = {
-      status: 'idle',
+      status: config.sleeping === true ? 'sleeping' : 'idle',
       createdAt: new Date().toISOString()
     } as AgentState
     copyConfigFields(config, state)
@@ -65,6 +67,22 @@ export class AgentRegistry extends EventEmitter {
     }
   }
 
+  markSleeping(name: string, sleptAt: string): void {
+    const agent = this.agents.get(name)
+    if (!agent) return
+    agent.sleeping = true
+    agent.sleptAt = sleptAt
+    agent.status = 'sleeping'
+    this.emit('status', { name, status: 'sleeping' })
+  }
+
+  markWaking(name: string): void {
+    const agent = this.agents.get(name)
+    if (!agent) return
+    agent.status = 'waking'
+    this.emit('status', { name, status: 'waking' })
+  }
+
   remove(name: string): void {
     if (!this.agents.has(name)) return
     this.agents.delete(name)
@@ -81,6 +99,7 @@ export class AgentRegistry extends EventEmitter {
   }
 
   isHealthy(name: string, maxAge = 60000): boolean {
+    if (this.agents.get(name)?.status === 'sleeping') return true // no process, no heartbeats
     const last = this.lastHeartbeat.get(name)
     if (!last) return true // No heartbeats expected yet
     return Date.now() - last < maxAge
