@@ -51,6 +51,8 @@ interface FloatingWindowProps {
   ) => React.ReactNode | null
   onEditAgent?: (agentId: string) => void
   status?: AgentStatus
+  /** What decides whether "Sleep now" is offered (see cardPresentation). */
+  sleepInfo?: { cli?: string; sessionStarted?: boolean; neverSleep?: boolean }
   onSleepAgent?: (agentId: string) => void
   onWakeAgent?: (agentId: string) => void
   children: React.ReactNode
@@ -90,6 +92,7 @@ export function FloatingWindow({
   onTitleBarContextMenu,
   onEditAgent,
   status,
+  sleepInfo,
   onSleepAgent,
   onWakeAgent,
   children
@@ -239,7 +242,7 @@ export function FloatingWindow({
   // Minimized: hide but keep hooks alive (React requires consistent hook count)
   if (minimized) return null
 
-  const presentation = cardPresentation(status ?? 'idle')
+  const presentation = cardPresentation({ status: status ?? 'idle', ...sleepInfo })
   const themedWindowStyle: React.CSSProperties = {
     ...windowStyle,
     opacity: presentation.opacity,

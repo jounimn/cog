@@ -181,6 +181,10 @@ export function TeamProposalDialog({ proposal, activeTabId, onClose, onApproved 
     const allOn = checked.every(Boolean)
     setChecked(checked.map(() => !allOn))
   }
+  const toggleAllAsleep = () => {
+    const allAsleep = editedAgents.every(a => !!a.spawnAsleep)
+    setEditedAgents(prev => prev.map(a => ({ ...a, spawnAsleep: !allAsleep || undefined })))
+  }
   const toggleExpanded = (index: number) => {
     setExpanded(prev => {
       const next = new Set(prev)
@@ -249,6 +253,17 @@ export function TeamProposalDialog({ proposal, activeTabId, onClose, onApproved 
                 <th style={thStyle}>Role</th>
                 <th style={thStyle}>Mode</th>
                 <th style={thStyle}>Shell</th>
+                <th style={thStyle} title="Spawn asleep (wake on first task)">
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={editedAgents.length > 0 && editedAgents.every(a => !!a.spawnAsleep)}
+                      onChange={toggleAllAsleep}
+                      title="Spawn every agent asleep (wake on first task)"
+                    />
+                    Asleep
+                  </label>
+                </th>
                 <th style={{ ...thStyle, width: '60px' }}>Notes</th>
               </tr>
             </thead>
@@ -368,6 +383,21 @@ function AgentRow({ agent, checked, expanded, onToggle, onToggleExpanded, onChan
           />
         </td>
         <td style={tdStyle}>
+          <label
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
+            title="Spawn asleep (wake on first task)"
+          >
+            <input
+              type="checkbox"
+              checked={!!agent.spawnAsleep}
+              onChange={(e) => onChange({ spawnAsleep: e.target.checked || undefined })}
+            />
+            <span style={{ fontSize: '11px', color: agent.spawnAsleep ? '#8cc4ff' : '#888' }}>
+              {agent.spawnAsleep ? 'asleep' : 'awake'}
+            </span>
+          </label>
+        </td>
+        <td style={tdStyle}>
           <button
             onClick={onToggleExpanded}
             style={{
@@ -384,7 +414,7 @@ function AgentRow({ agent, checked, expanded, onToggle, onToggleExpanded, onChan
       {expanded && (
         <tr>
           <td style={tdStyle}></td>
-          <td colSpan={7} style={{ ...tdStyle, paddingBottom: '12px' }}>
+          <td colSpan={8} style={{ ...tdStyle, paddingBottom: '12px' }}>
             <div style={{ color: '#666', fontSize: '11px', marginBottom: '4px' }}>
               CEO notes — what this agent should do:
             </div>

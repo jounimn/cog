@@ -27,4 +27,14 @@ describe('AgentRegistry sleep state', () => {
     r.register({ ...base, name: 'B', spawnAsleep: true, neverSleep: true, worktree: true, worktreePath: 'W', projectRoot: 'P', workDir: 'D' })
     expect(r.get('B')).toMatchObject({ spawnAsleep: true, neverSleep: true, worktree: true, worktreePath: 'W', projectRoot: 'P', workDir: 'D' })
   })
+  it('an awake re-register clears sleeping and sleptAt left by an earlier sleep', () => {
+    const r = new AgentRegistry()
+    r.register({ ...base, name: 'B', sleeping: true, sleptAt: '2026-10-13T00:00:00.000Z' })
+    r.markWaking('B')
+    r.register({ ...base, name: 'B' }) // the woken agent, config has sleeping/sleptAt unset
+    const s = r.get('B')
+    expect(s?.status).toBe('idle')
+    expect(s?.sleptAt).toBeUndefined()
+    expect(s?.sleeping).toBeUndefined()
+  })
 })

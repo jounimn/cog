@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { SleepManager, type SleepManagerDeps } from './sleep-manager'
 import type { SleepCandidate } from './sleep-policy'
+import { StatusDetector } from '../shell/status-detector'
 
 function cand(over: Partial<SleepCandidate> = {}): SleepCandidate {
   return {
@@ -40,9 +41,38 @@ describe('SleepManager', () => {
     m.noteStatus('a1', 'idle')
     m.noteStatus('a1', 'sleeping')
     expect(m.idleSince('a1')).toBeNull()
-    m.noteStatus('a1', 'idle')
+    // 'active' (at the prompt after silence) counts as idle and keeps the clock.
+    vi.setSystemTime(1_010_000)
     m.noteStatus('a1', 'active')
+    expect(m.idleSince('a1')).toBe(1_010_000)
+    vi.setSystemTime(1_020_000)
+    m.noteStatus('a1', 'idle')
+    expect(m.idleSince('a1')).toBe(1_010_000)
+    m.noteStatus('a1', 'working')
     expect(m.idleSince('a1')).toBeNull()
+  })
+
+  it('sleeps an agent after the real status-detector sequence working -> active', () => {
+    const deps = makeDeps({
+      candidates: () => [cand({ status: detector.status, idleSince: m.idleSince('a1') })]
+    })
+    const m: SleepManager = new SleepManager(deps)
+    const detector = new StatusDetector({ onChange: (s) => m.noteStatus('a1', s) })
+    m.noteStatus('a1', detector.status) // spawn: 'idle'
+    detector.onData('Thinking...\n') // first output byte -> 'working'
+    expect(detector.status).toBe('working')
+    expect(m.idleSince('a1')).toBeNull()
+    detector.onData('done\n> ') // ends at the prompt
+    vi.advanceTimersByTime(2_000)      // silence -> 'active'
+    expect(detector.status).toBe('active')
+    const activeAt = m.idleSince('a1')
+    expect(activeAt).not.toBeNull()
+    vi.setSystemTime((activeAt as number) + 9 * 60_000)
+    m.tick()
+    expect(deps.sleep).not.toHaveBeenCalled()
+    vi.setSystemTime((activeAt as number) + 10 * 60_000 + 1)
+    m.tick()
+    expect(deps.sleep).toHaveBeenCalledWith('a1', 'idle')
   })
 
   it('tick sleeps agents the policy picks (idle timeout)', () => {

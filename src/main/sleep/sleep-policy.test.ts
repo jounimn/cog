@@ -94,7 +94,7 @@ describe('pickAgentsToSleep', () => {
     expect(d.lowMemStreak).toBe(2)
   })
 
-  it('never picks working or active agents for memory', () => {
+  it('never picks working agents (or ones without an idle clock) for memory', () => {
     const d = pickAgentsToSleep(input({
       agents: [
         agent({ id: 'w', name: 'w', status: 'working', idleSince: null }),
@@ -103,6 +103,16 @@ describe('pickAgentsToSleep', () => {
       freeMemMb: 1000, lowMemStreak: 1
     }))
     expect(d.sleep).toEqual([])
+  })
+
+  it('treats active (at the prompt) as idle for both idle timeout and memory', () => {
+    expect(pickAgentsToSleep(input({ agents: [agent({ status: 'active' })] })).sleep)
+      .toEqual([{ id: 'a1', reason: 'idle' }])
+    const d = pickAgentsToSleep(input({
+      agents: [agent({ id: 'c', name: 'c', status: 'active', idleSince: NOW - 2 * MIN })],
+      freeMemMb: 1000, lowMemStreak: 1
+    }))
+    expect(d.sleep).toEqual([{ id: 'c', reason: 'memory' }])
   })
 
   it('resets the streak when memory is fine', () => {

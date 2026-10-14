@@ -502,6 +502,7 @@ export function Workspace({
                 agentId={agent?.id}
                 onEditAgent={agent && agent.cli !== 'terminal' ? onEditAgent : undefined}
                 status={agent?.status}
+                sleepInfo={agent ? { cli: agent.cli, sessionStarted: !!agent.sessionStarted, neverSleep: !!agent.neverSleep } : undefined}
                 onSleepAgent={agent ? onSleepAgent : undefined}
                 onWakeAgent={agent ? onWakeAgent : undefined}
                 onTitleBarContextMenu={

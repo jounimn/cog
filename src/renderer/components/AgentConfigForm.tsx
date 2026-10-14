@@ -152,6 +152,8 @@ export interface AgentConfigFormProps {
   onChange: Dispatch<SetStateAction<AgentConfigFormValue>>
   /** Inline error messages keyed by field name */
   errors?: Partial<Record<keyof AgentConfigFormValue, string>>
+  /** Spawn asleep is creation-only; the edit dialog hides it. */
+  hideSpawnAsleep?: boolean
 }
 
 export function buildSubmitConfig(v: AgentConfigFormValue): Omit<AgentConfig, 'id'> {
@@ -203,7 +205,7 @@ export function emptyFormValue(defaults?: Partial<AgentConfigFormValue>): AgentC
   }
 }
 
-export function AgentConfigForm({ value, onChange, errors }: AgentConfigFormProps): React.ReactElement {
+export function AgentConfigForm({ value, onChange, errors, hideSpawnAsleep }: AgentConfigFormProps): React.ReactElement {
   const [showSkillBrowser, setShowSkillBrowser] = useState(false)
   const isWindows = navigator.platform.toLowerCase().includes('win')
   const shellOptions = isWindows ? WINDOWS_SHELLS : POSIX_SHELLS
@@ -359,14 +361,16 @@ export function AgentConfigForm({ value, onChange, errors }: AgentConfigFormProp
         </span>
       </label>
 
-      <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-        <input
-          type="checkbox"
-          checked={value.spawnAsleep}
-          onChange={e => onChange(prev => ({ ...prev, spawnAsleep: e.target.checked }))}
-        />
-        Spawn asleep (wake on first task)
-      </label>
+      {!hideSpawnAsleep && (
+        <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
+          <input
+            type="checkbox"
+            checked={value.spawnAsleep}
+            onChange={e => onChange(prev => ({ ...prev, spawnAsleep: e.target.checked }))}
+          />
+          Spawn asleep (wake on first task)
+        </label>
+      )}
 
       <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
         <input

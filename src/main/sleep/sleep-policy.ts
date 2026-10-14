@@ -52,7 +52,7 @@ export function pickAgentsToSleep(input: SleepPolicyInput): SleepDecision {
 
   const eligible = input.agents.filter(
     (a) =>
-      a.status === 'idle' &&
+      (a.status === 'idle' || a.status === 'active') &&
       a.idleSince !== null &&
       canSleep(a, true) &&
       !input.pendingNudgeNames.has(a.name) &&

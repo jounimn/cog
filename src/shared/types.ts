@@ -500,6 +500,7 @@ export interface ProposedAgent {
   providerUrl?: string
   theme?: AgentTheme
   worktree?: boolean
+  spawnAsleep?: boolean  // create it asleep; it wakes on its first task
 }
 
 export type TeamProposalStatus = 'pending' | 'approved' | 'rejected' | 'expired'

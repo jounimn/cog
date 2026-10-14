@@ -37,7 +37,10 @@ export class SleepManager {
   }
 
   noteStatus(id: string, status: AgentStatus): void {
-    if (status === 'idle') {
+    // The status detector reports 'idle' only before the first output byte;
+    // an agent sitting at its prompt after silence is 'active'. Both count as
+    // idle for sleep purposes; only 'working' (or leaving) clears the clock.
+    if (status === 'idle' || status === 'active') {
       if (!this.idleSinceById.has(id)) this.idleSinceById.set(id, this.now())
     } else {
       this.idleSinceById.delete(id)

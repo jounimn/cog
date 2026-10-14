@@ -9,7 +9,7 @@ const ALLOWED_CONFIG_KEYS = [
   'id', 'name', 'cli', 'role', 'model', 'shell', 'cwd',
   'ceoNotes', 'admin', 'autoMode', 'tabId', 'groupId',
   'promptRegex', 'providerUrl', 'experimental', 'skills', 'theme',
-  'sleeping', 'sleptAt', 'spawnAsleep', 'neverSleep',
+  'sleeping', 'sleptAt', 'spawnAsleep', 'neverSleep', 'sessionStarted',
   'worktree', 'worktreePath', 'projectRoot', 'workDir'
 ] as const
 
@@ -37,6 +37,11 @@ export class AgentRegistry extends EventEmitter {
       // pick any key present on AgentState (status, createdAt, __proto__, etc.)
       // and clobber server-managed runtime state.
       copyConfigFields(config, existing)
+      // An awake re-register (wake, respawn) must not keep a stale sleptAt.
+      if (config.sleeping !== true) {
+        delete existing.sleeping
+        delete existing.sleptAt
+      }
       existing.status = config.sleeping === true ? 'sleeping' : 'idle'
       this.emit('status', { name: existing.name, status: existing.status })
       return existing

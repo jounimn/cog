@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync, readFileSync, openSync, readSync, closeSync } from 'fs'
 import os from 'os'
 import path from 'path'
+import { sessionStrategyFor, type SessionStrategy } from '../shared/session-strategy'
 
 /**
  * Per-CLI session persistence for Cog agents.
@@ -34,25 +35,8 @@ import path from 'path'
  * tries to resume something that was never created.
  */
 
-export type SessionStrategy = 'pinnable' | 'discovered' | 'directory' | 'none'
-
-export function sessionStrategyFor(cli: string): SessionStrategy {
-  switch (cli) {
-    case 'claude':
-    case 'openclaude':
-    case 'gemini':
-    case 'copilot':
-    case 'grok':
-      return 'pinnable'
-    case 'codex':
-    case 'kimi':
-      return 'discovered'
-    case 'pi':
-      return 'directory'
-    default:
-      return 'none'
-  }
-}
+export { sessionStrategyFor }
+export type { SessionStrategy }
 
 /** What cli-launch needs to know to attach a launch to a session. */
 export type SessionLaunch =

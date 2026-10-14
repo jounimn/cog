@@ -60,7 +60,7 @@ import { deriveProjectRoot } from './agent-root'
 import os from 'os'
 import { canSleep, type SleepCandidate } from './sleep/sleep-policy'
 import { SleepManager } from './sleep/sleep-manager'
-import { reconnectWorktreeNote, slugTakenBySleeper } from './sleep/sleep-state'
+import { reconnectWorktreeNote, slugTakenBySleeper, shouldSpawnAsleep, sleepingRosterRows, planRosterRespawn } from './sleep/sleep-state'
 import { routeTaskNudge, type RoutableAgent } from './sleep/wake-routing'
 import { shouldReleaseOnRespawn } from './worktree-respawn'
 import { agentSlug, defaultWorktreeForRole } from '../shared/agent-worktree-defaults'
@@ -1317,6 +1317,7 @@ function scheduleSessionDiscovery(config: AgentConfig, since: number): void {
     config.sessionId = id
     config.sessionStarted = true
     persistAgentConfig(config)
+    noteSessionStarted(config)
     cancelSessionDiscovery(config.id)
     console.log(`Agent "${config.name}": discovered ${config.cli} session ${id}`)
   }, delay))
@@ -1338,6 +1339,16 @@ function onInitialPromptInjected(config: AgentConfig): void {
   if (config.sessionStarted) return
   config.sessionStarted = true
   persistAgentConfig(config)
+  noteSessionStarted(config)
+}
+
+// Mirror sessionStarted onto the registry entry so the card knows the agent
+// can now be put to sleep (the menu hides "Sleep now" until then).
+function noteSessionStarted(config: AgentConfig): void {
+  const state = hubForConfig(config).registry.get(config.name)
+  if (!state || state.id !== config.id) return
+  state.sessionStarted = true
+  if (contextRegistry.isActive(config.tabId || DEFAULT_WORKSPACE_ID)) mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
 }
 
 // Build a reconnect prompt that includes context about what the agent was doing before it crashed.
@@ -1587,7 +1598,7 @@ function spawnPtyAndWire(
 
   agents.set(config.id, managed)
   if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
-  // Idle time starts at spawn; the first working/active transition clears it.
+  // Idle time starts at spawn; the first 'working' transition clears it.
   contextRegistry.resolveForSpawn(config.tabId)?.sleepManager?.noteStatus(config.id, 'idle')
 
   const ensurePiAdapter = config.cli === 'pi' && !piAdapterEnsured
@@ -1757,7 +1768,7 @@ function handleSpawnAgent(
   }
 
   // Spawn asleep: worktree/work dir are ready, but no PTY until first woken.
-  if (config.spawnAsleep && !opts?.reconnect && !opts?.wake && !config.sessionStarted) {
+  if (shouldSpawnAsleep(config, opts)) {
     config.sleeping = true
     config.sleptAt = new Date().toISOString()
     h.registry.register(config)
@@ -1850,7 +1861,8 @@ function spawnProposalAgents(proposal: TeamProposal): { spawned: number; total: 
       skills: a.skills,
       tabId,
       theme: a.theme,
-      worktree: a.worktree ?? defaultWorktreeForRole(a.role, a.cli)
+      worktree: a.worktree ?? defaultWorktreeForRole(a.role, a.cli),
+      spawnAsleep: a.spawnAsleep || undefined
     }
     try {
       handleSpawnAgent(config)
@@ -1996,13 +2008,25 @@ function sleepAgent(id: string, reason: 'idle' | 'memory' | 'user'): { ok: true 
     reason !== 'user'
   )) return { ok: false, error: `"${config.name}" cannot sleep (no resumable session or excluded from sleep)` }
 
+  const hadManualKill = manualKills.has(id)
   manualKills.add(id) // the PTY exit must not auto-reconnect
   cancelSessionDiscovery(id)
   sleepingOutput.set(id, managed.outputBuffer.getLines(1000))
   // Mark asleep before the kill so the PTY's onExit leaves the status alone.
   config.sleeping = true
   config.sleptAt = new Date().toISOString()
-  killPty(managed)
+  try {
+    killPty(managed)
+  } catch (err: any) {
+    const error = err?.message ?? String(err)
+    // Still running: undo the sleep marks so it stays a normal awake agent.
+    config.sleeping = false
+    delete config.sleptAt
+    if (!hadManualKill) manualKills.delete(id)
+    sleepingOutput.delete(id)
+    postSleepNote(config, `Could not put "${config.name}" to sleep: ${error}`)
+    return { ok: false, error }
+  }
   // Config files are per agent id: remove them now, not in the async onExit,
   // which could otherwise delete the files a quick wake just wrote.
   if (config.cli === 'pi') cleanupPiAgentDir(piAgentDir(id))
@@ -2031,12 +2055,20 @@ function findRosterConfig(id: string): AgentConfig | undefined {
   return undefined
 }
 
-// Sleeping roster row matching an id or (case-insensitive) name, in any live context.
-function findSleepingConfig(nameOrId: string): AgentConfig | undefined {
+// Sleeping roster row matching an id or (case-insensitive) name. With a
+// tabId, the agent's own workspace is authoritative: a name it knows (asleep
+// or awake) never falls through to a same-named agent in another workspace.
+function findSleepingConfig(nameOrId: string, tabId?: string | null): AgentConfig | undefined {
   const lower = nameOrId.toLowerCase()
+  const matches = (c: AgentConfig): boolean => c.id === nameOrId || c.name.toLowerCase() === lower
+  const own = tabId ? contextRegistry.get(tabId) : undefined
+  if (own) {
+    const row = own.stores.roster.list().find(matches)
+    if (row) return row.sleeping === true ? row : undefined
+  }
   for (const wsId of contextRegistry.ids()) {
     const cfg = contextRegistry.get(wsId)?.stores.roster.list()
-      .find(c => c.sleeping === true && (c.id === nameOrId || c.name.toLowerCase() === lower))
+      .find(c => c.sleeping === true && matches(c))
     if (cfg) return cfg
   }
   return undefined
@@ -2092,6 +2124,10 @@ function wakeAgent(id: string, reason: 'task' | 'user' | 'schedule'): { ok: true
     } else {
       handleSpawnAgent(cfg, { wake: true })
     }
+    // The spawn re-registered it as 'idle': keep the card on 'waking' until
+    // the new PTY's first status change (onStatusChange) replaces it.
+    h.registry.markWaking(cfg.name)
+    mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
   } catch (err: any) {
     const error = err?.message ?? String(err)
     cfg.sleeping = true
@@ -2115,28 +2151,39 @@ function wakeAgent(id: string, reason: 'task' | 'user' | 'schedule'): { ok: true
 const NUDGE_FALLBACK_DELAY = 5000
 
 // Registry entry of a sleeping or waking agent, searched across every live
-// workspace hub (a sleeper's entry lives on its own workspace's hub).
-function sleepStateOf(agentName: string): { status: 'sleeping' | 'waking'; id: string } | undefined {
+// workspace hub (a sleeper's entry lives on its own workspace's hub). With a
+// tabId, the agent's own workspace hub answers first: if it knows the name,
+// its answer stands and no other workspace's same-named agent is considered.
+function sleepStateOf(agentName: string, tabId?: string | null): { status: 'sleeping' | 'waking'; id: string } | undefined {
+  const asSleepState = (state: AgentState | undefined): { status: 'sleeping' | 'waking'; id: string } | undefined =>
+    state && (state.status === 'sleeping' || state.status === 'waking') ? { status: state.status, id: state.id } : undefined
+  const ownHub = tabId ? contextRegistry.get(tabId)?.hub : undefined
+  const own = ownHub?.registry.get(agentName)
+  if (own) return asSleepState(own)
   const hubs = [hub, ...contextRegistry.ids().map(wsId => contextRegistry.get(wsId)?.hub)]
   for (const h of hubs) {
-    const state = h?.registry.get(agentName)
-    if (state && (state.status === 'sleeping' || state.status === 'waking')) {
-      return { status: state.status, id: state.id }
-    }
+    const state = asSleepState(h?.registry.get(agentName))
+    if (state) return state
   }
   return undefined
 }
 
-function deliverNudge(agentName: string, nudge: string, opts: { wake: boolean } = { wake: false }): void {
+// Queue a nudge for an agent whose CLI is not ready (asleep or waking); no
+// fallback timer, flushPendingNudges delivers it once the CLI is ready.
+function queueNudge(agentName: string, nudge: string): void {
+  if (!pendingNudges.has(agentName)) pendingNudges.set(agentName, [])
+  pendingNudges.get(agentName)!.push(nudge)
+}
+
+function deliverNudge(agentName: string, nudge: string, opts: { wake?: boolean; tabId?: string | null } = {}): void {
   // Sleeping or waking: queue only (no fallback timer). flushPendingNudges
   // delivers it once the woken CLI is ready. Only a sleeping agent is woken,
   // and only when asked (tasks); a waking one never gets a second wake.
-  const asleep = sleepStateOf(agentName)
+  const asleep = sleepStateOf(agentName, opts.tabId)
   if (asleep) {
-    if (!pendingNudges.has(agentName)) pendingNudges.set(agentName, [])
-    pendingNudges.get(agentName)!.push(nudge)
+    queueNudge(agentName, nudge)
     if (opts.wake && asleep.status === 'sleeping') {
-      const id = findSleepingConfig(agentName)?.id ?? asleep.id
+      const id = findSleepingConfig(agentName, opts.tabId)?.id ?? asleep.id
       const woke = wakeAgent(id, 'task')
       if (!woke.ok) console.warn(`[sleep] could not wake "${agentName}" for a task: ${woke.error}`)
     }
@@ -2272,7 +2319,7 @@ function setupMessageNudge(hub: HubServer, workspaceId: string): void {
     if (!target) return
 
     const nudge = `[Cog] New message from "${msg.from}". You MUST call get_messages() now to read it, then act on it immediately.`
-    deliverNudge(msg.to, nudge)
+    deliverNudge(msg.to, nudge, { tabId: workspaceId })
   }
 }
 
@@ -2306,10 +2353,20 @@ function setupTaskNudge(hub: HubServer): void {
       },
       registered.map(toRoutable)
     )
-    for (const name of route.write) deliverNudge(name, nudge)
+    const tabId = task.tabId ?? null
+    for (const name of route.write) deliverNudge(name, nudge, { tabId })
+    // Wake by the routed id, never by name: another workspace may have a
+    // same-named sleeper.
     for (const id of route.wake) {
       const name = registered.find(a => a.id === id)?.name ?? findRosterConfig(id)?.name
-      if (name) deliverNudge(name, nudge, { wake: true })
+      if (!name) continue
+      if (agents.has(id)) {
+        deliverNudge(name, nudge, { tabId })
+        continue
+      }
+      queueNudge(name, nudge)
+      const woke = wakeAgent(id, 'task')
+      if (!woke.ok) console.warn(`[sleep] could not wake "${name}" for a task: ${woke.error}`)
     }
   }
 }
@@ -2802,6 +2859,11 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
   })
   sleepManager.start()
 
+  // Sleepers have no process to respawn: register them now, whatever the
+  // respawn mode, so they show as cards, answer get_agents, can be woken or
+  // closed, and keep their slug reserved.
+  for (const cfg of sleepingRosterRows(rosterStore.list())) hub.registry.register(cfg)
+
   return {
     workspaceId,
     projectPath,
@@ -2868,9 +2930,15 @@ function agentRespawnMode(): 'all' | 'active' | 'none' {
  */
 function respawnRosterFor(ctx: WorkspaceCtx): void {
   respawnedRosters.add(ctx.workspaceId)
-  for (const cfg of ctx.stores.roster.list()) {
-    if (agents.has(cfg.id)) continue // already running
-    if (cfg.sleeping) { ctx.hub.registry.register(cfg); continue } // card shows asleep, no PTY
+  // Sleepers were registered when the context was created; register only the
+  // missing ones (idempotent), never spawn them. Their card shows asleep, no PTY.
+  const plan = planRosterRespawn(
+    ctx.stores.roster.list(),
+    (id) => agents.has(id),
+    (name) => !!ctx.hub.registry.get(name)
+  )
+  for (const cfg of plan.register) ctx.hub.registry.register(cfg)
+  for (const cfg of plan.spawn) {
     try {
       handleSpawnAgent(cfg, { reconnect: true })
     } catch (err: any) {
@@ -3152,6 +3220,8 @@ function setupIPC(): void {
       // History wipe: never carry the old session into the new config.
       sessionId: undefined,
       sessionStarted: undefined,
+      // Spawn asleep is creation-only: an edit must start the agent awake.
+      spawnAsleep: undefined,
     }
 
     try {
@@ -3550,7 +3620,8 @@ function setupIPC(): void {
         providerUrl: a.providerUrl,
         skills: a.skills,
         tabId,
-        theme: a.theme
+        theme: a.theme,
+        spawnAsleep: a.spawnAsleep || undefined
       }
       try {
         const result = handleSpawnAgent(config)

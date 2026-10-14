@@ -58,6 +58,21 @@ export function App(): React.ReactElement {
   const [showSpawnDialog, setShowSpawnDialog] = useState(false)
   const [showPresetDialog, setShowPresetDialog] = useState(false)
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
+  // Inline notice for a failed sleep/wake (the IPC result used to be dropped).
+  const [sleepNotice, setSleepNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!sleepNotice) return
+    const t = setTimeout(() => setSleepNotice(null), 8000)
+    return () => clearTimeout(t)
+  }, [sleepNotice])
+  const runSleepAction = useCallback((verb: 'sleep' | 'wake', id: string) => {
+    const call = verb === 'sleep' ? window.electronAPI.sleepAgent(id) : window.electronAPI.wakeAgent(id)
+    void call.then((res) => {
+      if (!res.ok) setSleepNotice(`Could not ${verb === 'sleep' ? 'put the agent to sleep' : 'wake the agent'}: ${res.error}`)
+    }).catch((err: unknown) => {
+      setSleepNotice(`Could not ${verb === 'sleep' ? 'put the agent to sleep' : 'wake the agent'}: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }, [])
   const [showBugReport, setShowBugReport] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showHelpMcpTools, setShowHelpMcpTools] = useState(false)
@@ -765,8 +780,8 @@ export function App(): React.ReactElement {
             }}
             activeTabId={activeTabId}
             onEditAgent={(id) => setEditingAgentId(id)}
-            onSleepAgent={(id) => { void window.electronAPI.sleepAgent(id) }}
-            onWakeAgent={(id) => { void window.electronAPI.wakeAgent(id) }}
+            onSleepAgent={(id) => runSleepAction('sleep', id)}
+            onWakeAgent={(id) => runSleepAction('wake', id)}
           />
           {showSpawnDialog && (
             <SpawnDialog
@@ -816,6 +831,19 @@ export function App(): React.ReactElement {
             />
           )}
           <UpdateNotice />
+          {sleepNotice && (
+            <div role="status" style={{
+              position: 'fixed', bottom: '12px', right: '12px', zIndex: 99999, maxWidth: '360px',
+              backgroundColor: '#3a1e1e', border: '1px solid #ff6b6b', borderRadius: '8px',
+              padding: '10px 14px', fontSize: '12px', color: '#e0e0e0', boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+              display: 'flex', gap: '10px', alignItems: 'flex-start'
+            }}>
+              <span style={{ flex: 1 }}>{sleepNotice}</span>
+              <button onClick={() => setSleepNotice(null)} style={{
+                background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '14px', padding: '0 2px'
+              }}>x</button>
+            </div>
+          )}
           <WhatsNewDialog />
         </>
       )}

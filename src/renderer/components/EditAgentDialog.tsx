@@ -46,7 +46,8 @@ function configToFormValue(agent: AgentConfig): AgentConfigFormValue {
     showAdvanced: !!agent.promptRegex,
     worktree: agent.worktree ?? defaultWorktreeForRole(agent.role, agent.cli),
     worktreeTouched: agent.worktree !== undefined,
-    spawnAsleep: agent.spawnAsleep ?? false,
+    // Spawn asleep is creation-only: never loaded into an edit.
+    spawnAsleep: false,
     neverSleep: agent.neverSleep ?? false,
   }
 }
@@ -120,7 +121,7 @@ export function EditAgentDialog({ agent, onClose }: EditAgentDialogProps): React
         <h2 style={{ margin: 0, fontSize: '16px', color: '#e0e0e0' }}>
           Edit Agent — <span style={{ color: '#888' }}>{agent.name}</span>
         </h2>
-        <AgentConfigForm value={form} onChange={setForm} errors={errors} />
+        <AgentConfigForm value={form} onChange={setForm} errors={errors} hideSpawnAsleep />
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
           <button type="button" onClick={handleCancel} style={cancelBtnStyle} disabled={submitting}>Cancel</button>
           <button type="submit" disabled={!form.name.trim() || submitting} style={saveBtnStyle}>

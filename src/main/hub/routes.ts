@@ -137,7 +137,8 @@ export function createRoutes(
     const { from, to, message } = req.body
     const result = messages.send(from, to, message)
     if (result.status !== 'error' && registry.get(to)?.status === 'sleeping') {
-      res.json({ ...result, note: sleepingMessageNote(to) })
+      // Stored, not seen: it waits in the queue until the agent is woken.
+      res.json({ ...result, status: 'queued', note: sleepingMessageNote(to) })
       return
     }
     res.json(result)

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { AutonomySettings } from './AutonomySettings'
 import QRCode from 'qrcode-svg'
 import type { SleepSettings, AgentState, WorkspaceTheme, CommunityThemeListItem, CommunityTheme, AgentTheme, TelegramStatus, TelegramTopicsStatus, NotificationThreshold } from '../../shared/types'
+import { parseSleepNumber } from '../sleep-ui'
 import { ROLE_THEME_DEFAULTS, getPresetById, THEME_PRESETS, WORKSPACE_THEMES, getWorkspaceThemeById } from '../themes'
 
 declare const electronAPI: {
@@ -31,6 +32,16 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
   const [customThemeName, setCustomThemeName] = useState('')
   const [showSaveCustom, setShowSaveCustom] = useState(false)
   const [sleepSettings, setSleepSettings] = useState<SleepSettings | null>(null)
+  // Typed text per number field, saved on blur / Enter (clearing must not write 0).
+  const [sleepDrafts, setSleepDrafts] = useState<Partial<Record<'sleepAfterMinutes' | 'memoryFloorMb', string>>>({})
+  const commitSleepDraft = async (key: 'sleepAfterMinutes' | 'memoryFloorMb'): Promise<void> => {
+    const draft = sleepDrafts[key]
+    if (draft === undefined) return
+    setSleepDrafts(prev => { const next = { ...prev }; delete next[key]; return next })
+    const n = parseSleepNumber(draft)
+    if (n === null || n === sleepSettings?.[key]) return // invalid or unchanged: show the saved value again
+    setSleepSettings(await window.electronAPI.sleepSettingsSet({ [key]: n }))
+  }
 
   useEffect(() => {
     window.electronAPI.getActiveWorkspaceTheme().then(setActiveWsThemeId)
@@ -460,12 +471,13 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
                 type="number"
                 min={0}
                 step={1}
-                value={sleepSettings[key]}
-                onChange={async (e) => {
-                  const n = Math.floor(Number(e.target.value))
-                  if (!Number.isFinite(n) || n < 0) return
-                  setSleepSettings(await window.electronAPI.sleepSettingsSet({ [key]: n }))
+                value={sleepDrafts[key] ?? String(sleepSettings[key])}
+                onChange={(e) => {
+                  const text = e.target.value
+                  setSleepDrafts(prev => ({ ...prev, [key]: text }))
                 }}
+                onBlur={() => { void commitSleepDraft(key) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
                 style={{
                   width: 90, backgroundColor: '#1a1a1a', color: '#e0e0e0',
                   border: '1px solid #333', borderRadius: 4, padding: '6px 8px', fontSize: 12
