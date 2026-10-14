@@ -16,6 +16,10 @@ export function buildInitialPrompt(config: AgentConfig, projectRoot?: string): s
       : '',
     `Do these steps NOW: 1) Call read_ceo_notes() for your instructions. 2) Call get_messages() to check for messages. 3) Call read_tasks() to check for open tasks you can claim.`,
     `Your CEO notes define your workflow. Follow them exactly. After initial setup, WAIT for nudges — do NOT poll.`,
+    `When you finish a task you claimed: call complete_task(task_id, summary) — say what you did and where the work is (branch, files) — then send_message to the agent that posted it (the orchestrator if unsure) with the same summary. Do both before you go idle; never leave a claimed task silent.`,
+    isOrchestrator
+      ? `When a task you posted is completed or abandoned you get a nudge: call get_task(id) to read the result and keep the plan moving — post the next task or integrate the work.`
+      : '',
     config.workDir
       ? `Temporary outputs, logs and scratch files go under "${config.workDir}" — never outside the project folder.`
       : '',
