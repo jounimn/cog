@@ -46,6 +46,13 @@ describe('taskCompletionNudge', () => {
     expect(n?.text).toContain('Result: no summary given.')
   })
 
+  it('flattens multi-line results and truncates long ones, since the nudge is typed into a terminal', () => {
+    const multi = taskCompletionNudge({ ...done, result: 'line one\n  line two\r\n\nline three' }, agents)
+    expect(multi?.text).toContain('Result: line one line two line three.')
+    const long = taskCompletionNudge({ ...done, result: 'x'.repeat(800) }, agents)
+    expect(long?.text).toContain(`Result: ${'x'.repeat(500)}…. Call get_task`)
+  })
+
   it('reports an abandoned task as open again', () => {
     const n = taskCompletionNudge({ ...done, status: 'open', claimedBy: null, result: null }, agents)
     expect(n?.targets).toEqual(['lead'])
