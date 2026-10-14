@@ -60,6 +60,7 @@ import { shouldReleaseOnRespawn } from './worktree-respawn'
 import { agentSlug, defaultWorktreeForRole } from '../shared/agent-worktree-defaults'
 import { ensureAgentWorktree, releaseAgentWorktree, ensureWorkDir, listAgentWorktrees, removeAgentWorktree } from './git/agent-worktree'
 import { isTransientFsError } from './git/agent-worktree-pure'
+import { taskCompletionNudge } from './hub/task-completion-nudge'
 import { BoardStore } from './db/board-store'
 import { BoardAppearanceStore } from './db/board-appearance-store'
 import { saveImageBytes, saveRenderBytes, renderPathForPage } from './board/board-files'
@@ -2125,6 +2126,20 @@ function setupInfoNudge(hub: HubServer): void {
   }
 }
 
+// When a task is completed or abandoned, nudge whoever has to act on it: the
+// agent that posted it and the orchestrators of that tab. Until now the only
+// signal was an OS notification to the user, so agents finished work and sat
+// idle while nobody downstream knew. Chains on onTaskUpdated like the others.
+function setupTaskCompletionNudge(hub: HubServer): void {
+  const existingCallback = hub.pinboard.onTaskUpdated
+  hub.pinboard.onTaskUpdated = (task) => {
+    existingCallback?.(task)
+    const nudge = taskCompletionNudge(task, hub.registry.list().filter(a => a.name !== 'user'))
+    if (!nudge) return
+    for (const name of nudge.targets) deliverNudge(name, nudge.text)
+  }
+}
+
 // Periodically check for tasks stuck in in_progress and nudge orchestrators about them.
 // This catches cases where a worker completed work but forgot to call complete_task(),
 // or where a worker became unresponsive with a claimed task.
@@ -2425,6 +2440,7 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
   // openProject / on switch, not per-context.)
   setupMessageNudge(hub, workspaceId)
   setupTaskNudge(hub)
+  setupTaskCompletionNudge(hub)
   setupInfoNudge(hub)
   loadLinkState(hub, projectPath)
 

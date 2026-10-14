@@ -26,4 +26,19 @@ describe('buildInitialPrompt', () => {
     expect(p).toContain('WAIT for nudges')
     expect(buildInitialPrompt(cfg(), String.raw`C:\p`)).not.toContain('propose_team')
   })
+
+  it('tells every agent, whatever its role or CLI, to report a finished task before going idle', () => {
+    for (const over of [{ role: 'worker', cli: 'claude' }, { role: 'designer', cli: 'codex' }, { role: 'reviewer', cli: 'gemini' }, { role: 'orchestrator', cli: 'claude' }]) {
+      const p = buildInitialPrompt(cfg(over), String.raw`C:\p`)
+      expect(p).toContain('When you finish a task you claimed: call complete_task(task_id, summary)')
+      expect(p).toContain('then send_message to the agent that posted it')
+      expect(p).toContain('before you go idle')
+    }
+  })
+
+  it('tells orchestrators what to do with a completion nudge', () => {
+    const p = buildInitialPrompt(cfg({ role: 'orchestrator' }), String.raw`C:\p`)
+    expect(p).toContain('When a task you posted is completed or abandoned you get a nudge: call get_task(id)')
+    expect(buildInitialPrompt(cfg({ role: 'worker' }), String.raw`C:\p`)).not.toContain('When a task you posted')
+  })
 })
