@@ -118,6 +118,7 @@ export function spawnAgentPty(opts: SpawnOptions): ManagedPty {
 }
 
 export function writeToPty(managed: ManagedPty, data: string): void {
+  managed.statusDetector.noteInput()
   managed.pty.write(data)
 }
 

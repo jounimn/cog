@@ -71,6 +71,19 @@ export class StatusDetector {
     }, this.silenceMs)
   }
 
+  /**
+   * Something was written to the PTY (a launch command, a nudge, an Enter).
+   * Whatever prompt was on screen is now consumed, so it must not count as
+   * "waiting at the prompt" until the CLI draws a fresh one. Without this the
+   * shell's own prompt (PS C:\...>) stays in the recent text while the CLI is
+   * still starting, 'active' fires and the initial prompt is pasted into a
+   * CLI that has not opened stdin yet (text and Enter then arrive as one paste).
+   */
+  noteInput(): void {
+    this.recentText = ''
+    this.lastLineMatchedPrompt = false
+  }
+
   onExit(): void {
     if (this.silenceTimer) clearTimeout(this.silenceTimer)
     this.setStatus('disconnected')

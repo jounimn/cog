@@ -85,6 +85,19 @@ describe('StatusDetector', () => {
     expect(detector.status).toBe('active')
   })
 
+  it('forgets the prompt once input is written, so a shell prompt seen before the launch command cannot fire active', () => {
+    const onChange = vi.fn()
+    const detector = new StatusDetector({ onChange })
+    detector.onData('PS C:\\work> ')
+    detector.noteInput() // Cog types `claude ...` + Enter
+    detector.onData('claude --resume abc\r\n')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('working')
+    detector.onData('❯ ')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('active')
+  })
+
   it('stays working when no prompt line is anywhere in the recent output', () => {
     const detector = new StatusDetector()
     for (let i = 0; i < 20; i++) detector.onData(`spinner frame ${i}\nstatus line ${i}`)
