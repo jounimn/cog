@@ -14,7 +14,7 @@ import { meetsThreshold } from './hub/inbox-channel'
 import { createHubServer, type HubServer } from './hub/server'
 import type { ScheduleBridge, BoardBridge, AgentBridge } from './hub/routes'
 import { spawnAgentPty, writeToPty, resizePty, killPty, type ManagedPty } from './shell/pty-manager'
-import { submitWhenQuiet } from './shell/submit-timing'
+import { submitUntilAccepted } from './shell/submit-timing'
 import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig } from './cli-launch'
 import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir } from './mcp/config-writer'
 import { savePreset, loadPreset, listPresets, deletePreset, setPresetsDir } from './presets/preset-manager'
@@ -1388,11 +1388,20 @@ function injectPrompt(managed: ManagedPty, prompt: string, delayMs: number): voi
     const minMs = (managed.config.cli === 'codex' || managed.config.cli === 'gemini')
       ? CODEX_SUBMIT_DELAY
       : 500
-    // A long paste on a loaded machine keeps the TUI rendering past the fixed
-    // delay, and an Enter sent mid-render is dropped: the prompt then sits
-    // unsent in the input box (seen live on wake). Press Enter once the
-    // terminal has gone quiet, or at the deadline.
-    submitWhenQuiet({ lastOutputAt: () => managed.lastOutputAt, submit: () => writeToPty(managed, '\r'), minMs })
+    // Claude Code drops the Enter while its startup hooks are still running
+    // (~30 s on a loaded laptop, on every wake) and the prompt sits unsent in
+    // the input box. Press Enter once the paste has rendered, then again
+    // every few seconds until the CLI visibly starts answering.
+    submitUntilAccepted({
+      lastOutputAt: () => managed.lastOutputAt,
+      outputChunks: () => managed.outputChunks,
+      submit: () => writeToPty(managed, '\r'),
+      minMs,
+      onDone: (acceptedOnTry) => {
+        if (acceptedOnTry === null) console.warn(`Agent "${managed.config.name}": prompt not accepted after repeated Enter`)
+        else if (acceptedOnTry > 1) console.log(`Agent "${managed.config.name}": prompt accepted on Enter #${acceptedOnTry}`)
+      }
+    })
   }, delayMs)
 }
 

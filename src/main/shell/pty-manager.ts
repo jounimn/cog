@@ -13,6 +13,8 @@ export interface ManagedPty {
   projectRoot: string
   /** Date.now() of the last byte the PTY produced (0 before any output). */
   lastOutputAt: number
+  /** Data chunks the PTY has produced so far. */
+  outputChunks: number
 }
 
 interface SpawnOptions {
@@ -99,11 +101,13 @@ export function spawnAgentPty(opts: SpawnOptions): ManagedPty {
     outputBuffer,
     mcpConfigPath: opts.mcpConfigPath,
     projectRoot: opts.projectRoot,
-    lastOutputAt: 0
+    lastOutputAt: 0,
+    outputChunks: 0
   }
 
   ptyProcess.onData((data: string) => {
     managed.lastOutputAt = Date.now()
+    managed.outputChunks++
     statusDetector.onData(data)
     outputBuffer.pushRaw(data)
     opts.onData(data)
