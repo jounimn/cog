@@ -11,6 +11,8 @@ export interface ManagedPty {
   outputBuffer: OutputBuffer
   mcpConfigPath: string | null
   projectRoot: string
+  /** Date.now() of the last byte the PTY produced (0 before any output). */
+  lastOutputAt: number
 }
 
 interface SpawnOptions {
@@ -90,7 +92,18 @@ export function spawnAgentPty(opts: SpawnOptions): ManagedPty {
     ...(process.platform === 'win32' ? { useConptyDll: true } : {})
   })
 
+  const managed: ManagedPty = {
+    pty: ptyProcess,
+    config: opts.config,
+    statusDetector,
+    outputBuffer,
+    mcpConfigPath: opts.mcpConfigPath,
+    projectRoot: opts.projectRoot,
+    lastOutputAt: 0
+  }
+
   ptyProcess.onData((data: string) => {
+    managed.lastOutputAt = Date.now()
     statusDetector.onData(data)
     outputBuffer.pushRaw(data)
     opts.onData(data)
@@ -101,14 +114,7 @@ export function spawnAgentPty(opts: SpawnOptions): ManagedPty {
     opts.onExit(exitCode)
   })
 
-  return {
-    pty: ptyProcess,
-    config: opts.config,
-    statusDetector,
-    outputBuffer,
-    mcpConfigPath: opts.mcpConfigPath,
-    projectRoot: opts.projectRoot
-  }
+  return managed
 }
 
 export function writeToPty(managed: ManagedPty, data: string): void {

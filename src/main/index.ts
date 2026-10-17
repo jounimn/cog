@@ -14,6 +14,7 @@ import { meetsThreshold } from './hub/inbox-channel'
 import { createHubServer, type HubServer } from './hub/server'
 import type { ScheduleBridge, BoardBridge, AgentBridge } from './hub/routes'
 import { spawnAgentPty, writeToPty, resizePty, killPty, type ManagedPty } from './shell/pty-manager'
+import { submitWhenQuiet } from './shell/submit-timing'
 import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig } from './cli-launch'
 import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir } from './mcp/config-writer'
 import { savePreset, loadPreset, listPresets, deletePreset, setPresetsDir } from './presets/preset-manager'
@@ -1384,10 +1385,14 @@ function injectPrompt(managed: ManagedPty, prompt: string, delayMs: number): voi
     // Sending both in a single write can cause the Enter to be dropped
     // when the TUI is still rendering the input text.
     writeToPty(managed, prompt)
-    const submitDelay = (managed.config.cli === 'codex' || managed.config.cli === 'gemini')
+    const minMs = (managed.config.cli === 'codex' || managed.config.cli === 'gemini')
       ? CODEX_SUBMIT_DELAY
       : 500
-    setTimeout(() => writeToPty(managed, '\r'), submitDelay)
+    // A long paste on a loaded machine keeps the TUI rendering past the fixed
+    // delay, and an Enter sent mid-render is dropped: the prompt then sits
+    // unsent in the input box (seen live on wake). Press Enter once the
+    // terminal has gone quiet, or at the deadline.
+    submitWhenQuiet({ lastOutputAt: () => managed.lastOutputAt, submit: () => writeToPty(managed, '\r'), minMs })
   }, delayMs)
 }
 
