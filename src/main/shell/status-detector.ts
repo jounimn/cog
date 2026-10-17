@@ -1,7 +1,14 @@
 import type { AgentStatus } from '../../shared/types'
 
+// TUI redraws position the cursor instead of printing newlines, so the prompt
+// and the status bar arrive glued together. Cursor moves (CUP, CHA, VPA, the
+// relative moves) and erases become line breaks before the rest is stripped.
 function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+  return str
+    .replace(/\x1b\[[0-9;]*[HfABCDEFGdJK]/g, '\n')
+    .replace(/\x1b\[[0-9;?<>=]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/\r/g, '\n')
 }
 
 interface StatusDetectorOptions {

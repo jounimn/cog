@@ -76,6 +76,15 @@ describe('StatusDetector', () => {
     expect(detector.status).toBe('active')
   })
 
+  it('treats cursor positioning as line breaks, so a repaint with the prompt mid-chunk still counts', () => {
+    // Claude Code repaints with CUP/CHA moves instead of newlines: the prompt
+    // and the status bar arrive as one "line" unless cursor moves are split on.
+    const detector = new StatusDetector()
+    detector.onData('\x1b[?25l\x1b[5;1H\x1b[2K❯ \x1b[6;1H⏵⏵ bypass permissions on (shift+tab to cycle)\x1b[7;1H▄ waiting | worker-1 | ctx:8%\x1b[?25h')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('active')
+  })
+
   it('stays working when no prompt line is anywhere in the recent output', () => {
     const detector = new StatusDetector()
     for (let i = 0; i < 20; i++) detector.onData(`spinner frame ${i}\nstatus line ${i}`)
