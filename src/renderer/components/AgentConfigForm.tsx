@@ -143,6 +143,8 @@ export interface AgentConfigFormValue {
   showAdvanced: boolean
   worktree: boolean
   worktreeTouched: boolean
+  spawnAsleep: boolean
+  neverSleep: boolean
 }
 
 export interface AgentConfigFormProps {
@@ -150,6 +152,8 @@ export interface AgentConfigFormProps {
   onChange: Dispatch<SetStateAction<AgentConfigFormValue>>
   /** Inline error messages keyed by field name */
   errors?: Partial<Record<keyof AgentConfigFormValue, string>>
+  /** Spawn asleep is creation-only; the edit dialog hides it. */
+  hideSpawnAsleep?: boolean
 }
 
 export function buildSubmitConfig(v: AgentConfigFormValue): Omit<AgentConfig, 'id'> {
@@ -168,6 +172,8 @@ export function buildSubmitConfig(v: AgentConfigFormValue): Omit<AgentConfig, 'i
     experimental: v.cli === 'grok' ? true : undefined,
     skills: v.selectedSkills.length > 0 ? v.selectedSkills.map(s => s.id) : undefined,
     worktree: (v.cli || v.customCli.trim()) === 'terminal' ? false : v.worktree,
+    spawnAsleep: v.spawnAsleep || undefined,
+    neverSleep: v.neverSleep || undefined,
   }
 }
 
@@ -193,11 +199,13 @@ export function emptyFormValue(defaults?: Partial<AgentConfigFormValue>): AgentC
     showAdvanced: false,
     worktree: defaultWorktreeForRole('worker', 'claude'),
     worktreeTouched: false,
+    spawnAsleep: false,
+    neverSleep: false,
     ...defaults,
   }
 }
 
-export function AgentConfigForm({ value, onChange, errors }: AgentConfigFormProps): React.ReactElement {
+export function AgentConfigForm({ value, onChange, errors, hideSpawnAsleep }: AgentConfigFormProps): React.ReactElement {
   const [showSkillBrowser, setShowSkillBrowser] = useState(false)
   const isWindows = navigator.platform.toLowerCase().includes('win')
   const shellOptions = isWindows ? WINDOWS_SHELLS : POSIX_SHELLS
@@ -351,6 +359,26 @@ export function AgentConfigForm({ value, onChange, errors }: AgentConfigFormProp
         <span style={{ color: '#666', fontSize: '11px' }}>
           .cog/worktrees/{worktreeSlug} · branch cog/{worktreeSlug}
         </span>
+      </label>
+
+      {!hideSpawnAsleep && (
+        <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
+          <input
+            type="checkbox"
+            checked={value.spawnAsleep}
+            onChange={e => onChange(prev => ({ ...prev, spawnAsleep: e.target.checked }))}
+          />
+          Spawn asleep (wake on first task)
+        </label>
+      )}
+
+      <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
+        <input
+          type="checkbox"
+          checked={value.neverSleep}
+          onChange={e => onChange(prev => ({ ...prev, neverSleep: e.target.checked }))}
+        />
+        Never sleep
       </label>
 
       <label style={labelStyle}>

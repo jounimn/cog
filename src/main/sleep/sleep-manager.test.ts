@@ -1,0 +1,187 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { SleepManager, type SleepManagerDeps } from './sleep-manager'
+import type { SleepCandidate } from './sleep-policy'
+import { StatusDetector } from '../shell/status-detector'
+
+function cand(over: Partial<SleepCandidate> = {}): SleepCandidate {
+  return {
+    id: 'a1', name: 'alice', role: 'worker', cli: 'claude', status: 'idle',
+    idleSince: null, sessionStarted: true, neverSleep: false, ...over
+  }
+}
+
+function makeDeps(over: Partial<SleepManagerDeps> = {}) {
+  const deps: SleepManagerDeps & { sleep: ReturnType<typeof vi.fn>; postMemoryNote: ReturnType<typeof vi.fn> } = {
+    settings: () => ({ enabled: true, sleepAfterMinutes: 10, memoryFloorMb: 1500 }),
+    candidates: () => [],
+    pendingNudgeNames: () => new Set(),
+    inProgressTaskAgents: () => new Set(),
+    promptNotInjectedIds: () => new Set(),
+    freeMemMb: () => 8000,
+    sleep: vi.fn(),
+    postMemoryNote: vi.fn(),
+    ...over
+  } as never
+  return deps
+}
+
+describe('SleepManager', () => {
+  beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(1_000_000) })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('noteStatus idle sets idleSince once; working clears it', () => {
+    const m = new SleepManager(makeDeps())
+    m.noteStatus('a1', 'idle')
+    expect(m.idleSince('a1')).toBe(1_000_000)
+    vi.setSystemTime(1_005_000)
+    m.noteStatus('a1', 'idle')
+    expect(m.idleSince('a1')).toBe(1_000_000)
+    m.noteStatus('a1', 'working')
+    expect(m.idleSince('a1')).toBeNull()
+    m.noteStatus('a1', 'idle')
+    m.noteStatus('a1', 'sleeping')
+    expect(m.idleSince('a1')).toBeNull()
+    // 'active' (at the prompt after silence) counts as idle and keeps the clock.
+    vi.setSystemTime(1_010_000)
+    m.noteStatus('a1', 'active')
+    expect(m.idleSince('a1')).toBe(1_010_000)
+    vi.setSystemTime(1_020_000)
+    m.noteStatus('a1', 'idle')
+    expect(m.idleSince('a1')).toBe(1_010_000)
+    m.noteStatus('a1', 'working')
+    expect(m.idleSince('a1')).toBeNull()
+  })
+
+  it('sleeps an agent after the real status-detector sequence working -> active', () => {
+    const deps = makeDeps({
+      candidates: () => [cand({ status: detector.status, idleSince: m.idleSince('a1') })]
+    })
+    const m: SleepManager = new SleepManager(deps)
+    const detector = new StatusDetector({ onChange: (s) => m.noteStatus('a1', s) })
+    m.noteStatus('a1', detector.status) // spawn: 'idle'
+    detector.onData('Thinking...\n') // first output byte -> 'working'
+    expect(detector.status).toBe('working')
+    expect(m.idleSince('a1')).toBeNull()
+    detector.onData('done\n> ') // ends at the prompt
+    vi.advanceTimersByTime(2_000)      // silence -> 'active'
+    expect(detector.status).toBe('active')
+    const activeAt = m.idleSince('a1')
+    expect(activeAt).not.toBeNull()
+    vi.setSystemTime((activeAt as number) + 9 * 60_000)
+    m.tick()
+    expect(deps.sleep).not.toHaveBeenCalled()
+    vi.setSystemTime((activeAt as number) + 10 * 60_000 + 1)
+    m.tick()
+    expect(deps.sleep).toHaveBeenCalledWith('a1', 'idle')
+  })
+
+  it('tick sleeps agents the policy picks (idle timeout)', () => {
+    const deps = makeDeps({
+      candidates: () => [cand({ idleSince: m.idleSince('a1') })]
+    })
+    const m: SleepManager = new SleepManager(deps)
+    m.noteStatus('a1', 'idle')
+    vi.setSystemTime(1_000_000 + 11 * 60_000)
+    m.tick()
+    expect(deps.sleep).toHaveBeenCalledWith('a1', 'idle')
+  })
+
+  it('a spawn-time noteStatus idle alone starts the clock (no later transition)', () => {
+    const seen: Array<number | null> = []
+    const deps = makeDeps({
+      candidates: () => {
+        const idleSince = m.idleSince('a1')
+        seen.push(idleSince)
+        return [cand({ idleSince })]
+      }
+    })
+    const m: SleepManager = new SleepManager(deps)
+    m.noteStatus('a1', 'idle') // spawn
+    vi.setSystemTime(1_000_000 + 9 * 60_000)
+    m.tick()
+    expect(deps.sleep).not.toHaveBeenCalled()
+    vi.setSystemTime(1_000_000 + 10 * 60_000 + 1)
+    m.tick()
+    expect(seen).toEqual([1_000_000, 1_000_000])
+    expect(deps.sleep).toHaveBeenCalledWith('a1', 'idle')
+  })
+
+  it('forget clears idle state so a wake does not inherit a stale idleSince', () => {
+    const deps = makeDeps({ candidates: () => [cand({ idleSince: m.idleSince('a1') })] })
+    const m: SleepManager = new SleepManager(deps)
+    m.noteStatus('a1', 'idle')
+    vi.setSystemTime(1_000_000 + 11 * 60_000)
+    m.tick()
+    expect(deps.sleep).toHaveBeenCalledTimes(1)
+    m.forget('a1')
+    expect(m.idleSince('a1')).toBeNull()
+    m.noteStatus('a1', 'idle') // wake
+    vi.setSystemTime(1_000_000 + 15 * 60_000)
+    m.tick()
+    expect(deps.sleep).toHaveBeenCalledTimes(1)
+  })
+
+  it('a throwing dep does not escape tick', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const deps = makeDeps({ freeMemMb: () => { throw new Error('boom') } })
+    const m = new SleepManager(deps)
+    expect(() => m.tick()).not.toThrow()
+    expect(err).toHaveBeenCalled()
+    err.mockRestore()
+  })
+
+  it('does not sleep before the timeout', () => {
+    const deps = makeDeps({ candidates: () => [cand({ idleSince: m.idleSince('a1') })] })
+    const m: SleepManager = new SleepManager(deps)
+    m.noteStatus('a1', 'idle')
+    vi.setSystemTime(1_000_000 + 5 * 60_000)
+    m.tick()
+    expect(deps.sleep).not.toHaveBeenCalled()
+  })
+
+  it('carries lowMemStreak across ticks: two low ticks -> one memory sleep', () => {
+    const deps = makeDeps({
+      freeMemMb: () => 100,
+      candidates: () => [cand({ idleSince: m.idleSince('a1') })]
+    })
+    const m: SleepManager = new SleepManager(deps)
+    m.noteStatus('a1', 'idle')
+    vi.setSystemTime(1_000_000 + 60_000)
+    m.tick()
+    expect(deps.sleep).not.toHaveBeenCalled()
+    m.tick()
+    expect(deps.sleep).toHaveBeenCalledTimes(1)
+    expect(deps.sleep).toHaveBeenCalledWith('a1', 'memory')
+  })
+
+  it('posts the memory note at most once per 10 minutes', () => {
+    const deps = makeDeps({
+      freeMemMb: () => 100,
+      candidates: () => [cand({ status: 'working' })]
+    })
+    const m = new SleepManager(deps)
+    m.tick()
+    expect(deps.postMemoryNote).not.toHaveBeenCalled()
+    m.tick()
+    expect(deps.postMemoryNote).toHaveBeenCalledTimes(1)
+    vi.setSystemTime(1_000_000 + 5 * 60_000)
+    m.tick()
+    expect(deps.postMemoryNote).toHaveBeenCalledTimes(1)
+    vi.setSystemTime(1_000_000 + 11 * 60_000)
+    m.tick()
+    expect(deps.postMemoryNote).toHaveBeenCalledTimes(2)
+  })
+
+  it('start ticks every 30s and stop stops', () => {
+    const deps = makeDeps({ freeMemMb: vi.fn(() => 8000) })
+    const m = new SleepManager(deps)
+    m.start()
+    vi.advanceTimersByTime(30_000)
+    expect(deps.freeMemMb).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(60_000)
+    expect(deps.freeMemMb).toHaveBeenCalledTimes(3)
+    m.stop()
+    vi.advanceTimersByTime(120_000)
+    expect(deps.freeMemMb).toHaveBeenCalledTimes(3)
+  })
+})

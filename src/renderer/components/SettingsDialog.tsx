@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { AutonomySettings } from './AutonomySettings'
 import QRCode from 'qrcode-svg'
-import type { AgentState, WorkspaceTheme, CommunityThemeListItem, CommunityTheme, AgentTheme, TelegramStatus, TelegramTopicsStatus, NotificationThreshold } from '../../shared/types'
+import type { SleepSettings, AgentState, WorkspaceTheme, CommunityThemeListItem, CommunityTheme, AgentTheme, TelegramStatus, TelegramTopicsStatus, NotificationThreshold } from '../../shared/types'
+import { parseSleepNumber } from '../sleep-ui'
 import { ROLE_THEME_DEFAULTS, getPresetById, THEME_PRESETS, WORKSPACE_THEMES, getWorkspaceThemeById } from '../themes'
 
 declare const electronAPI: {
@@ -30,10 +31,22 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
   const [customThemes, setCustomThemes] = useState<WorkspaceTheme[]>([])
   const [customThemeName, setCustomThemeName] = useState('')
   const [showSaveCustom, setShowSaveCustom] = useState(false)
+  const [sleepSettings, setSleepSettings] = useState<SleepSettings | null>(null)
+  // Typed text per number field, saved on blur / Enter (clearing must not write 0).
+  const [sleepDrafts, setSleepDrafts] = useState<Partial<Record<'sleepAfterMinutes' | 'memoryFloorMb', string>>>({})
+  const commitSleepDraft = async (key: 'sleepAfterMinutes' | 'memoryFloorMb'): Promise<void> => {
+    const draft = sleepDrafts[key]
+    if (draft === undefined) return
+    setSleepDrafts(prev => { const next = { ...prev }; delete next[key]; return next })
+    const n = parseSleepNumber(draft)
+    if (n === null || n === sleepSettings?.[key]) return // invalid or unchanged: show the saved value again
+    setSleepSettings(await window.electronAPI.sleepSettingsSet({ [key]: n }))
+  }
 
   useEffect(() => {
     window.electronAPI.getActiveWorkspaceTheme().then(setActiveWsThemeId)
     window.electronAPI.listCustomWorkspaceThemes().then(setCustomThemes)
+    window.electronAPI.sleepSettingsGet().then(setSleepSettings)
   }, [])
 
   const allThemes = useMemo(() => [...WORKSPACE_THEMES, ...customThemes], [customThemes])
@@ -430,6 +443,48 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
               <option value="none">Don&apos;t respawn</option>
             </select>
           </label>
+
+          <div style={{ fontSize: '12px', color: '#888', marginTop: 4 }}>Agent sleep (this workspace)</div>
+          {sleepSettings && (['enabled'] as const).map(() => (
+            <label key="sleep-enabled" style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
+            }}>
+              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Put idle agents to sleep</div>
+              <input
+                type="checkbox"
+                checked={sleepSettings.enabled}
+                onChange={async (e) => setSleepSettings(await window.electronAPI.sleepSettingsSet({ enabled: e.target.checked }))}
+              />
+            </label>
+          ))}
+          {sleepSettings && ([
+            { key: 'sleepAfterMinutes', label: 'Sleep after (minutes idle)' },
+            { key: 'memoryFloorMb', label: 'Memory floor (MB)' }
+          ] as const).map(({ key, label }) => (
+            <label key={key} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
+            }}>
+              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>{label}</div>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={sleepDrafts[key] ?? String(sleepSettings[key])}
+                onChange={(e) => {
+                  const text = e.target.value
+                  setSleepDrafts(prev => ({ ...prev, [key]: text }))
+                }}
+                onBlur={() => { void commitSleepDraft(key) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                style={{
+                  width: 90, backgroundColor: '#1a1a1a', color: '#e0e0e0',
+                  border: '1px solid #333', borderRadius: 4, padding: '6px 8px', fontSize: 12
+                }}
+              />
+            </label>
+          ))}
         </div>
 
         {/* Workspace Themes section */}

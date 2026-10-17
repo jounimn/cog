@@ -13,6 +13,7 @@ import type { GroupManager } from './group-manager'
 import type { AgentConfig, InboxPriority } from '../../shared/types'
 import type { MessageStore } from '../db/message-store'
 import { validateAgentScheduleRequest } from '../scheduler/scheduler-helpers'
+import { sleepingMessageNote, sleepingBroadcastNote } from '../sleep/sleep-notes'
 
 export type OutputAccessor = (agentName: string, lines: number) => string[] | null
 
@@ -135,13 +136,26 @@ export function createRoutes(
   router.post('/messages/send', (req: Request, res: Response) => {
     const { from, to, message } = req.body
     const result = messages.send(from, to, message)
+    if (result.status !== 'error' && registry.get(to)?.status === 'sleeping') {
+      // Stored, not seen: it waits in the queue until the agent is woken.
+      res.json({ ...result, status: 'queued', note: sleepingMessageNote(to) })
+      return
+    }
     res.json(result)
   })
 
   router.post('/messages/broadcast', (req: Request, res: Response) => {
     const { from, message } = req.body
     const result = messages.broadcast(from, message)
-    res.json(result)
+    if (result.error) {
+      res.json(result)
+      return
+    }
+    const sleeping = registry.list()
+      .filter((a) => a.name !== from && a.status === 'sleeping' && !result.failed.includes(a.name))
+      .map((a) => a.name)
+    const note = sleepingBroadcastNote(sleeping)
+    res.json(note ? { ...result, sleeping, note } : { ...result, sleeping })
   })
 
   router.get('/messages/:name', (req: Request, res: Response) => {

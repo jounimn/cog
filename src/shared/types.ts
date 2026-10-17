@@ -1,4 +1,4 @@
-export type AgentStatus = 'idle' | 'active' | 'working' | 'disconnected'
+export type AgentStatus = 'idle' | 'active' | 'working' | 'disconnected' | 'sleeping' | 'waking'
 
 export interface ProjectAutonomy {
   /** Epoch ms when the current autonomous session expires; null = off. */
@@ -63,6 +63,22 @@ export interface AgentConfig {
   worktreePath?: string  // derived at spawn: absolute path of the worktree checkout
   projectRoot?: string  // derived at spawn: the workspace folder, never the worktree
   workDir?: string  // derived at spawn: scratch dir <project>/.cog/work/<slug> (not where the CLI runs)
+  sleeping?: boolean  // process is gone, identity kept; wake respawns it
+  sleptAt?: string  // ISO timestamp of when the agent went to sleep
+  spawnAsleep?: boolean  // create the agent already asleep (no process until woken)
+  neverSleep?: boolean  // exempt from automatic hibernation
+}
+
+export interface SleepSettings {
+  enabled: boolean
+  sleepAfterMinutes: number
+  memoryFloorMb: number
+}
+
+export const DEFAULT_SLEEP_SETTINGS: SleepSettings = {
+  enabled: true,
+  sleepAfterMinutes: 10,
+  memoryFloorMb: 1500
 }
 
 export interface AgentState extends AgentConfig {
@@ -216,6 +232,10 @@ export const IPC = {
   GIT_NEW_BRANCH: 'git:new-branch',
   WORKTREE_LIST: 'worktree:list',
   WORKTREE_REMOVE: 'worktree:remove',
+  AGENT_SLEEP: 'agent:sleep',
+  AGENT_WAKE: 'agent:wake',
+  SLEEP_SETTINGS_GET: 'sleep:settings-get',
+  SLEEP_SETTINGS_SET: 'sleep:settings-set',
   TAB_GET_ALL: 'tab:get-all',
   TAB_CREATE: 'tab:create',
   TAB_CLOSE: 'tab:close',
@@ -480,6 +500,7 @@ export interface ProposedAgent {
   providerUrl?: string
   theme?: AgentTheme
   worktree?: boolean
+  spawnAsleep?: boolean  // create it asleep; it wakes on its first task
 }
 
 export type TeamProposalStatus = 'pending' | 'approved' | 'rejected' | 'expired'
@@ -618,7 +639,7 @@ export type ScheduleStatus = 'active' | 'paused' | 'stopped' | 'expired'
 
 export type RespawnResult =
   | { ok: true }
-  | { ok: false; error: 'AGENT_NOT_FOUND' | 'NAME_TAKEN' | 'CWD_MISSING' | 'INTERNAL'; message?: string }
+  | { ok: false; error: 'AGENT_NOT_FOUND' | 'AGENT_ASLEEP' | 'NAME_TAKEN' | 'CWD_MISSING' | 'INTERNAL'; message?: string }
 
 export interface ScheduledPrompt {
   id: string

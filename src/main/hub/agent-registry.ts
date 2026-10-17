@@ -8,7 +8,9 @@ import type { AgentConfig, AgentState, AgentStatus } from '../../shared/types'
 const ALLOWED_CONFIG_KEYS = [
   'id', 'name', 'cli', 'role', 'model', 'shell', 'cwd',
   'ceoNotes', 'admin', 'autoMode', 'tabId', 'groupId',
-  'promptRegex', 'providerUrl', 'experimental', 'skills', 'theme'
+  'promptRegex', 'providerUrl', 'experimental', 'skills', 'theme',
+  'sleeping', 'sleptAt', 'spawnAsleep', 'neverSleep', 'sessionStarted',
+  'worktree', 'worktreePath', 'projectRoot', 'workDir'
 ] as const
 
 function copyConfigFields(src: AgentConfig, dst: AgentState): void {
@@ -35,12 +37,17 @@ export class AgentRegistry extends EventEmitter {
       // pick any key present on AgentState (status, createdAt, __proto__, etc.)
       // and clobber server-managed runtime state.
       copyConfigFields(config, existing)
-      existing.status = 'idle'
+      // An awake re-register (wake, respawn) must not keep a stale sleptAt.
+      if (config.sleeping !== true) {
+        delete existing.sleeping
+        delete existing.sleptAt
+      }
+      existing.status = config.sleeping === true ? 'sleeping' : 'idle'
       this.emit('status', { name: existing.name, status: existing.status })
       return existing
     }
     const state: AgentState = {
-      status: 'idle',
+      status: config.sleeping === true ? 'sleeping' : 'idle',
       createdAt: new Date().toISOString()
     } as AgentState
     copyConfigFields(config, state)
@@ -59,10 +66,30 @@ export class AgentRegistry extends EventEmitter {
 
   updateStatus(name: string, status: AgentStatus): void {
     const agent = this.agents.get(name)
+    // A sleeping agent has no live process; late PTY output or exit must not
+    // replace 'sleeping' (task routing and message queueing key off it).
+    // markWaking and register are the only ways out of that state.
+    if (agent?.sleeping) return
     if (agent && agent.status !== status) {
       agent.status = status
       this.emit('status', { name, status })
     }
+  }
+
+  markSleeping(name: string, sleptAt: string): void {
+    const agent = this.agents.get(name)
+    if (!agent) return
+    agent.sleeping = true
+    agent.sleptAt = sleptAt
+    agent.status = 'sleeping'
+    this.emit('status', { name, status: 'sleeping' })
+  }
+
+  markWaking(name: string): void {
+    const agent = this.agents.get(name)
+    if (!agent) return
+    agent.status = 'waking'
+    this.emit('status', { name, status: 'waking' })
   }
 
   remove(name: string): void {
@@ -81,6 +108,7 @@ export class AgentRegistry extends EventEmitter {
   }
 
   isHealthy(name: string, maxAge = 60000): boolean {
+    if (this.agents.get(name)?.status === 'sleeping') return true // no process, no heartbeats
     const last = this.lastHeartbeat.get(name)
     if (!last) return true // No heartbeats expected yet
     return Date.now() - last < maxAge

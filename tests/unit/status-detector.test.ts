@@ -58,6 +58,53 @@ describe('StatusDetector', () => {
     expect(onChange).toHaveBeenCalledWith('active')
   })
 
+  it('reaches active when the prompt line is followed by a status line in the same redraw (Claude Code TUI)', () => {
+    const onChange = vi.fn()
+    const detector = new StatusDetector({ onChange })
+    detector.onData('❯ \n⏵⏵ bypass permissions on | worker-1 | ⎇ cog/worker-1 | ctx:8%')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('active')
+    expect(onChange).toHaveBeenLastCalledWith('active')
+  })
+
+  it('remembers a prompt line seen in an earlier chunk when later chunks only repaint the status line', () => {
+    const detector = new StatusDetector()
+    detector.onData('❯ ')
+    vi.advanceTimersByTime(500)
+    detector.onData('Cooked for 19s · done 04:22')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('active')
+  })
+
+  it('treats cursor positioning as line breaks, so a repaint with the prompt mid-chunk still counts', () => {
+    // Claude Code repaints with CUP/CHA moves instead of newlines: the prompt
+    // and the status bar arrive as one "line" unless cursor moves are split on.
+    const detector = new StatusDetector()
+    detector.onData('\x1b[?25l\x1b[5;1H\x1b[2K❯ \x1b[6;1H⏵⏵ bypass permissions on (shift+tab to cycle)\x1b[7;1H▄ waiting | worker-1 | ctx:8%\x1b[?25h')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('active')
+  })
+
+  it('forgets the prompt once input is written, so a shell prompt seen before the launch command cannot fire active', () => {
+    const onChange = vi.fn()
+    const detector = new StatusDetector({ onChange })
+    detector.onData('PS C:\\work> ')
+    detector.noteInput() // Cog types `claude ...` + Enter
+    detector.onData('claude --resume abc\r\n')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('working')
+    detector.onData('❯ ')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('active')
+  })
+
+  it('stays working when no prompt line is anywhere in the recent output', () => {
+    const detector = new StatusDetector()
+    for (let i = 0; i < 20; i++) detector.onData(`spinner frame ${i}\nstatus line ${i}`)
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('working')
+  })
+
   it('transitions to disconnected on exit', () => {
     const detector = new StatusDetector()
     detector.onExit()

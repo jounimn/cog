@@ -7,6 +7,7 @@ import { InboxStore } from '../db/inbox-store'
 import { ProposalsStore } from '../db/proposals-store'
 import { SchedulesStore } from '../scheduler/schedules-store'
 import { AutonomyStore } from '../db/autonomy-store'
+import { SleepSettingsStore } from '../db/sleep-settings-store'
 import { BoardStore } from '../db/board-store'
 import { BoardAppearanceStore } from '../db/board-appearance-store'
 import { AgentRegistry } from './agent-registry'
@@ -40,6 +41,7 @@ export class ProjectContext {
     proposals: ProposalsStore
     schedules: SchedulesStore
     autonomy: AutonomyStore
+    sleep: SleepSettingsStore
     board: BoardStore
     boardAppearance: BoardAppearanceStore
   }
@@ -69,6 +71,7 @@ export class ProjectContext {
       proposals: new ProposalsStore(this.db),
       schedules: new SchedulesStore(this.db),
       autonomy: new AutonomyStore(this.db),
+      sleep: new SleepSettingsStore(this.db),
       board: new BoardStore(this.db),
       boardAppearance: new BoardAppearanceStore(this.db)
     }

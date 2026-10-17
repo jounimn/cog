@@ -1,7 +1,14 @@
 import type { AgentStatus } from '../../shared/types'
 
+// TUI redraws position the cursor instead of printing newlines, so the prompt
+// and the status bar arrive glued together. Cursor moves (CUP, CHA, VPA, the
+// relative moves) and erases become line breaks before the rest is stripped.
 function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+  return str
+    .replace(/\x1b\[[0-9;]*[HfABCDEFGdJK]/g, '\n')
+    .replace(/\x1b\[[0-9;?<>=]*[a-zA-Z]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, '')
+    .replace(/\r/g, '\n')
 }
 
 interface StatusDetectorOptions {
@@ -11,12 +18,17 @@ interface StatusDetectorOptions {
   onClearDetected?: () => void
 }
 
+// Enough normalised text to hold one full TUI repaint (the prompt line plus
+// whatever the CLI draws under it), while spinner frames stream past.
+const RECENT_CHARS = 4000
+
 export class StatusDetector {
   private _status: AgentStatus = 'idle'
   private promptRegex: RegExp
   private silenceMs: number
   private silenceTimer: ReturnType<typeof setTimeout> | null = null
   private lastLineMatchedPrompt = false
+  private recentText = ''
   private onChange?: (status: AgentStatus) => void
   private onClearDetected?: () => void
   private awaitingPromptAfterClear = false
@@ -37,11 +49,15 @@ export class StatusDetector {
 
     const clean = stripAnsi(data)
     const lines = clean.split('\n').filter(line => line.trim().length > 0)
-    const lastLine = lines[lines.length - 1] ?? ''
     if (lines.some(line => line.trim() === '/clear')) {
       this.awaitingPromptAfterClear = true
     }
-    this.lastLineMatchedPrompt = this.promptRegex.test(lastLine)
+    // TUI CLIs repaint with cursor moves, so the last line of a chunk is
+    // usually a status line or spinner frame, not the input prompt. Keep the
+    // recent normalised text and treat the prompt as visible when any line in
+    // it matches; silence then means "waiting at the prompt".
+    this.recentText = (this.recentText + '\n' + clean).slice(-RECENT_CHARS)
+    this.lastLineMatchedPrompt = this.recentText.split('\n').some(line => line.trim().length > 0 && this.promptRegex.test(line))
 
     if (this.silenceTimer) clearTimeout(this.silenceTimer)
     this.silenceTimer = setTimeout(() => {
@@ -53,6 +69,19 @@ export class StatusDetector {
         this.setStatus('active')
       }
     }, this.silenceMs)
+  }
+
+  /**
+   * Something was written to the PTY (a launch command, a nudge, an Enter).
+   * Whatever prompt was on screen is now consumed, so it must not count as
+   * "waiting at the prompt" until the CLI draws a fresh one. Without this the
+   * shell's own prompt (PS C:\...>) stays in the recent text while the CLI is
+   * still starting, 'active' fires and the initial prompt is pasted into a
+   * CLI that has not opened stdin yet (text and Enter then arrive as one paste).
+   */
+  noteInput(): void {
+    this.recentText = ''
+    this.lastLineMatchedPrompt = false
   }
 
   onExit(): void {

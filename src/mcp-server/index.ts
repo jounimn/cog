@@ -124,6 +124,14 @@ function toolResult(data: unknown) {
   return { content: [{ type: 'text' as const, text: typeof data === 'string' ? data : JSON.stringify(data, null, 2) }] }
 }
 
+// Hub replies may carry a `note` (e.g. the recipient is asleep); surface it as
+// its own line so the agent reads it instead of digging through the JSON.
+function toolResultWithNote(result: { note?: unknown }) {
+  const out = toolResult(result)
+  if (typeof result.note === 'string' && result.note) out.content[0].text += `\n${result.note}`
+  return out
+}
+
 const server = new McpServer({
   name: 'agentorch',
   version: '1.0.0'
@@ -164,7 +172,7 @@ server.tool(
         body: JSON.stringify({ from: AGENT_NAME, to, message })
       })
       if (result.status === 'error') return toolError(result.detail || 'Send failed')
-      return toolResult(result)
+      return toolResultWithNote(result)
     } catch (err: any) {
       return toolError(`Failed to send message: ${err.message}`)
     }
@@ -385,7 +393,7 @@ server.tool(
         body: JSON.stringify({ from: AGENT_NAME, message })
       })
       if (result.error) return toolError(result.error)
-      return toolResult(result)
+      return toolResultWithNote(result)
     } catch (err: any) {
       return toolError(`Failed to broadcast: ${err.message}`)
     }

@@ -46,6 +46,9 @@ function configToFormValue(agent: AgentConfig): AgentConfigFormValue {
     showAdvanced: !!agent.promptRegex,
     worktree: agent.worktree ?? defaultWorktreeForRole(agent.role, agent.cli),
     worktreeTouched: agent.worktree !== undefined,
+    // Spawn asleep is creation-only: never loaded into an edit.
+    spawnAsleep: false,
+    neverSleep: agent.neverSleep ?? false,
   }
 }
 
@@ -85,6 +88,7 @@ export function EditAgentDialog({ agent, onClose }: EditAgentDialogProps): React
         const next: Partial<Record<keyof AgentConfigFormValue, string>> = {}
         if (result.error === 'NAME_TAKEN') next.name = 'An agent with this name already exists'
         else if (result.error === 'CWD_MISSING') next.cwd = 'Directory does not exist'
+        else if (result.error === 'AGENT_ASLEEP') next.name = 'Wake the agent before editing it'
         else next.name = result.message ?? 'Could not respawn agent'
         setErrors(next)
       }
@@ -117,7 +121,7 @@ export function EditAgentDialog({ agent, onClose }: EditAgentDialogProps): React
         <h2 style={{ margin: 0, fontSize: '16px', color: '#e0e0e0' }}>
           Edit Agent — <span style={{ color: '#888' }}>{agent.name}</span>
         </h2>
-        <AgentConfigForm value={form} onChange={setForm} errors={errors} />
+        <AgentConfigForm value={form} onChange={setForm} errors={errors} hideSpawnAsleep />
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
           <button type="button" onClick={handleCancel} style={cancelBtnStyle} disabled={submitting}>Cancel</button>
           <button type="submit" disabled={!form.name.trim() || submitting} style={saveBtnStyle}>

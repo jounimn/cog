@@ -9,10 +9,12 @@ import { InfoStore } from './db/info-store'
 import { InboxStore } from './db/inbox-store'
 import { ProposalsStore } from './db/proposals-store'
 import { AgentRosterStore } from './db/agent-roster-store'
+import { SleepSettingsStore } from './db/sleep-settings-store'
 import { meetsThreshold } from './hub/inbox-channel'
 import { createHubServer, type HubServer } from './hub/server'
 import type { ScheduleBridge, BoardBridge, AgentBridge } from './hub/routes'
 import { spawnAgentPty, writeToPty, resizePty, killPty, type ManagedPty } from './shell/pty-manager'
+import { submitUntilAccepted } from './shell/submit-timing'
 import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig } from './cli-launch'
 import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir } from './mcp/config-writer'
 import { savePreset, loadPreset, listPresets, deletePreset, setPresetsDir } from './presets/preset-manager'
@@ -48,14 +50,19 @@ import * as themesStore from './themes/themes-store'
 import * as workspaceThemeStore from './themes/workspace-theme-store'
 import { getWorkspaceThemeById, WORKSPACE_THEMES } from '../shared/workspace-themes'
 import { migrateLegacyUserData } from './migration/userdata-migration'
-import type { AgentConfig, AgentTheme, RemoteSetupProgress, CommunityAgent, CommunityCategory, RespawnResult, NotificationThreshold, ProposedAgent, TeamProposal, TelegramStatus } from '../shared/types'
-import { IPC } from '../shared/types'
+import type { AgentConfig, AgentState, AgentTheme, SleepSettings, RemoteSetupProgress, CommunityAgent, CommunityCategory, RespawnResult, NotificationThreshold, ProposedAgent, TeamProposal, TelegramStatus } from '../shared/types'
+import { IPC, DEFAULT_SLEEP_SETTINGS } from '../shared/types'
 import { validateRespawnRequest } from './respawn-validation'
 import { sessionStrategyFor, sessionExists, sessionDirHasSessions, discoverSessionId, type SessionLaunch } from './agent-session'
 import { initStreamDeck, disposeStreamDeck, resolveCogsworthDir, getStreamDeckStatus, reconnectStreamDeck, buildWhisperClient } from './streamdeck'
 import { prepareLocalWhisper, isLocalWhisperReady } from './streamdeck/local-whisper-prepare'
 import { buildInitialPrompt } from './agent-prompt'
 import { deriveProjectRoot } from './agent-root'
+import os from 'os'
+import { canSleep, type SleepCandidate } from './sleep/sleep-policy'
+import { SleepManager } from './sleep/sleep-manager'
+import { reconnectWorktreeNote, slugTakenBySleeper, shouldSpawnAsleep, sleepingRosterRows, planRosterRespawn } from './sleep/sleep-state'
+import { routeTaskNudge, type RoutableAgent } from './sleep/wake-routing'
 import { shouldReleaseOnRespawn } from './worktree-respawn'
 import { agentSlug, defaultWorktreeForRole } from '../shared/agent-worktree-defaults'
 import { ensureAgentWorktree, releaseAgentWorktree, ensureWorkDir, listAgentWorktrees, removeAgentWorktree } from './git/agent-worktree'
@@ -103,6 +110,7 @@ interface WorkspaceCtx {
     board: BoardStore
     boardAppearance: BoardAppearanceStore
     roster: AgentRosterStore
+    sleep: SleepSettingsStore
   }
   promptScheduler: PromptScheduler
   // Per-context bridges the hub resolves lazily. Kept on the ctx (not just the
@@ -111,6 +119,8 @@ interface WorkspaceCtx {
   scheduleBridge: ScheduleBridge
   boardBridge: BoardBridge
   agentBridge: AgentBridge
+  /** Idle-timeout / memory-floor hibernation tick for this context's agents. */
+  sleepManager: SleepManager
 }
 /**
  * The live per-workspace contexts + which one is active. This is the pure state
@@ -164,6 +174,7 @@ let scheduleBridge: ScheduleBridge | null = null
 let boardBridge: BoardBridge | null = null
 let agentBridge: AgentBridge | null = null
 const agents = new Map<string, ManagedPty>()
+const sleepingOutput = new Map<string, string[]>() // agentId → last output lines frozen when it went to sleep
 const hasReceivedInitialPrompt = new Set<string>()
 const initialPrompts = new Map<string, string>()
 const manualKills = new Set<string>() // Track intentional kills to skip auto-reconnect
@@ -450,7 +461,7 @@ async function enableRemoteView(): Promise<void> {
     },
     getAgentOutput: (agentId: string, lines?: number) => {
       const managed = agents.get(agentId)
-      if (!managed) return []
+      if (!managed) return sleepingOutput.get(agentId)?.slice(-(lines ?? 50)) ?? []
       return managed.outputBuffer.getLines(lines ?? 50)
     },
     sendMessage: (to: string, text: string) => {
@@ -1308,6 +1319,7 @@ function scheduleSessionDiscovery(config: AgentConfig, since: number): void {
     config.sessionId = id
     config.sessionStarted = true
     persistAgentConfig(config)
+    noteSessionStarted(config)
     cancelSessionDiscovery(config.id)
     console.log(`Agent "${config.name}": discovered ${config.cli} session ${id}`)
   }, delay))
@@ -1329,10 +1341,20 @@ function onInitialPromptInjected(config: AgentConfig): void {
   if (config.sessionStarted) return
   config.sessionStarted = true
   persistAgentConfig(config)
+  noteSessionStarted(config)
+}
+
+// Mirror sessionStarted onto the registry entry so the card knows the agent
+// can now be put to sleep (the menu hides "Sleep now" until then).
+function noteSessionStarted(config: AgentConfig): void {
+  const state = hubForConfig(config).registry.get(config.name)
+  if (!state || state.id !== config.id) return
+  state.sessionStarted = true
+  if (contextRegistry.isActive(config.tabId || DEFAULT_WORKSPACE_ID)) mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
 }
 
 // Build a reconnect prompt that includes context about what the agent was doing before it crashed.
-function buildReconnectPrompt(config: AgentConfig, projectRoot: string): string {
+function buildReconnectPrompt(config: AgentConfig, projectRoot: string, extra?: string): string {
   const base = buildInitialPrompt(config, projectRoot)
 
   const contextParts: string[] = []
@@ -1353,9 +1375,9 @@ function buildReconnectPrompt(config: AgentConfig, projectRoot: string): string 
     }
   }
 
-  if (contextParts.length === 0) return base
+  if (contextParts.length === 0) return base + (extra ?? '')
 
-  return `${base} RECONNECT CONTEXT: You were previously running but disconnected unexpectedly. ${contextParts.join(' ')}`
+  return `${base} RECONNECT CONTEXT: You were previously running but disconnected unexpectedly. ${contextParts.join(' ')}${extra ?? ''}`
 }
 
 function injectPrompt(managed: ManagedPty, prompt: string, delayMs: number): void {
@@ -1364,10 +1386,23 @@ function injectPrompt(managed: ManagedPty, prompt: string, delayMs: number): voi
     // Sending both in a single write can cause the Enter to be dropped
     // when the TUI is still rendering the input text.
     writeToPty(managed, prompt)
-    const submitDelay = (managed.config.cli === 'codex' || managed.config.cli === 'gemini')
+    const minMs = (managed.config.cli === 'codex' || managed.config.cli === 'gemini')
       ? CODEX_SUBMIT_DELAY
       : 500
-    setTimeout(() => writeToPty(managed, '\r'), submitDelay)
+    // Claude Code drops the Enter while its startup hooks are still running
+    // (~30 s on a loaded laptop, on every wake) and the prompt sits unsent in
+    // the input box. Press Enter once the paste has rendered, then again
+    // every few seconds until the CLI visibly starts answering.
+    submitUntilAccepted({
+      lastOutputAt: () => managed.lastOutputAt,
+      outputChunks: () => managed.outputChunks,
+      submit: () => writeToPty(managed, '\r'),
+      minMs,
+      onDone: (acceptedOnTry) => {
+        if (acceptedOnTry === null) console.warn(`Agent "${managed.config.name}": prompt not accepted after repeated Enter`)
+        else if (acceptedOnTry > 1) console.log(`Agent "${managed.config.name}": prompt accepted on Enter #${acceptedOnTry}`)
+      }
+    })
   }, delayMs)
 }
 
@@ -1388,6 +1423,13 @@ function hubForConfig(config: AgentConfig): HubServer {
 function postWorktreeNote(config: AgentConfig, text: string): void {
   try {
     hubForConfig(config).inboxChannel.postMessage(config.id, config.name, text, 'normal', ['worktree'], config.tabId)
+  } catch { /* inbox unavailable */ }
+}
+
+// Sibling of postWorktreeNote for sleep/wake notes.
+function postSleepNote(config: AgentConfig, text: string): void {
+  try {
+    hubForConfig(config).inboxChannel.postMessage(config.id, config.name, text, 'normal', ['sleep'], config.tabId)
   } catch { /* inbox unavailable */ }
 }
 
@@ -1513,10 +1555,17 @@ function spawnPtyAndWire(
       remoteWsHub?.pushAgentOutput(config.id, typeof data === 'string' ? data : String(data))
     },
     onExit: (exitCode) => {
-      h.registry.updateStatus(config.name, 'disconnected')
-      mainWindow.webContents.send(IPC.PTY_EXIT, config.id, exitCode)
-      if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
-      if (config.cli === 'pi') {
+      // A slept PTY may exit after its agent was already woken into a new one:
+      // leave the new PTY's status, renderer terminal and config files alone.
+      const superseded = agents.has(config.id) && agents.get(config.id) !== managed
+      if (!config.sleeping) h.registry.updateStatus(config.name, 'disconnected')
+      if (!superseded) {
+        mainWindow.webContents.send(IPC.PTY_EXIT, config.id, exitCode)
+        if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+      }
+      if (config.sleeping) {
+        // sleepAgent already removed the per-id config files.
+      } else if (config.cli === 'pi') {
         cleanupPiAgentDir(piAgentDir(config.id))
       } else if (managed.mcpConfigPath) {
         cleanupConfig(managed.mcpConfigPath)
@@ -1536,7 +1585,14 @@ function spawnPtyAndWire(
       }
     },
     onStatusChange: (status) => {
+      // A sleeping agent's PTY still reports its last bytes ('working') and its
+      // exit ('disconnected') after markSleeping; either would overwrite the
+      // registry's 'sleeping' and hide it from task routing and message
+      // queueing. A slept PTY that a wake already replaced would clobber the
+      // new one's status. Ignore everything from such a PTY.
+      if (config.sleeping || (agents.has(config.id) && agents.get(config.id) !== managed)) return
       h.registry.updateStatus(config.name, status)
+      contextRegistry.resolveForSpawn(config.tabId)?.sleepManager?.noteStatus(config.id, status)
       if (contextRegistry.isActive(spawnTab)) {
         mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
         remoteWsHub?.pushStateDelta(['agents'])
@@ -1563,6 +1619,8 @@ function spawnPtyAndWire(
 
   agents.set(config.id, managed)
   if (contextRegistry.isActive(spawnTab)) mainWindow.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+  // Idle time starts at spawn; the first 'working' transition clears it.
+  contextRegistry.resolveForSpawn(config.tabId)?.sleepManager?.noteStatus(config.id, 'idle')
 
   const ensurePiAdapter = config.cli === 'pi' && !piAdapterEnsured
   // Resume the agent's session when Cog saw one start (crash reconnect,
@@ -1605,6 +1663,7 @@ function reconnectAgent(config: AgentConfig): void {
   const projectRoot = agents.get(config.id)?.projectRoot ?? config.cwd
   try { h.registry.remove(config.name) } catch { /* already removed */ }
   agents.delete(config.id)
+  forgetIdle(config.tabId, config.id)
   hasReceivedInitialPrompt.delete(config.id)
 
   const mcpServerPath = getMcpServerPath()
@@ -1662,7 +1721,13 @@ function liveAgentForSlug(projectRoot: string, slug: string): ManagedPty | undef
   return undefined
 }
 
-function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): { id: string; mcpConfigPath: string } {
+// opts.wake: wakeAgent's first wake of a spawnAsleep agent (spawn it for real).
+// opts.onWorktree: sees the ensureAgentWorktree result; a returned string is
+// appended to the reconnect prompt.
+function handleSpawnAgent(
+  config: AgentConfig,
+  opts?: { reconnect?: boolean; wake?: boolean; onWorktree?: (r: ReturnType<typeof ensureAgentWorktree>) => string | void }
+): { id: string; mcpConfigPath: string } {
   // P2: an agent runs in its workspace's bound folder, so different workspaces
   // drive different projects. When the workspace isn't folder-bound (e.g. the
   // default tab), keep the config's cwd (which defaults to the current project).
@@ -1681,7 +1746,16 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
   const slug = agentSlug(config.name)
   const clashing = liveAgentForSlug(projectRoot, slug)
   if (clashing && clashing.config.id !== config.id) throw new Error(`Agent slug "${slug}" already in use in this project`)
+  // Register on the agent's OWN context hub (Stage 4) so its registry entry +
+  // metrics live with the workspace it belongs to, not whichever is active.
+  const ctx = contextRegistry.resolveForSpawn(config.tabId)
+  const h = ctx?.hub ?? hub
+  // A sleeping agent still owns its worktree/work dir.
+  if (ctx && slugTakenBySleeper(ctx.stores.roster.list(), projectRoot, slug, config.id)) {
+    throw new Error(`Agent slug "${slug}" is held by a sleeping agent in this project`)
+  }
 
+  let reconnectExtra = ''
   const wantsWorktree = (config.worktree ?? defaultWorktreeForRole(config.role, config.cli)) && config.cli !== 'terminal'
   if (wantsWorktree) {
     let r: ReturnType<typeof ensureAgentWorktree>
@@ -1690,6 +1764,7 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
     } catch (err: any) {
       r = { ok: false, reason: 'git-error', detail: err?.message ?? String(err), workDir: safeEnsureWorkDir(config, projectRoot) as string }
     }
+    reconnectExtra = opts?.onWorktree?.(r) || ''
     config.workDir = r.workDir || undefined
     if (r.ok) {
       config.worktreePath = r.path
@@ -1711,6 +1786,16 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
     // A respawn that no longer wants a worktree must leave the old checkout.
     if (config.worktreePath && config.cwd === config.worktreePath) config.cwd = projectRoot
     config.worktreePath = undefined
+  }
+
+  // Spawn asleep: worktree/work dir are ready, but no PTY until first woken.
+  if (shouldSpawnAsleep(config, opts)) {
+    config.sleeping = true
+    config.sleptAt = new Date().toISOString()
+    h.registry.register(config)
+    ctx?.stores.roster.save(config)
+    if (contextRegistry.isActive(config.tabId || DEFAULT_WORKSPACE_ID)) mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+    return { id: config.id, mcpConfigPath: '' }
   }
 
   // Apply persisted theme for this agent (if any) — preserves explicit override from preset
@@ -1743,10 +1828,6 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
 
   const mcpEnv = buildMcpEnv(config, projectRoot)
 
-  // Register on the agent's OWN context hub (Stage 4) so its registry entry +
-  // metrics live with the workspace it belongs to, not whichever is active.
-  const ctx = contextRegistry.resolveForSpawn(config.tabId)
-  const h = ctx?.hub ?? hub
   h.registry.register(config)
   h.agentMetrics.register(config.name)
   // Persist the ORIGINAL config to this workspace's roster so it respawns on
@@ -1767,7 +1848,7 @@ function handleSpawnAgent(config: AgentConfig, opts?: { reconnect?: boolean }): 
 
   // On a restart respawn, use the reconnect prompt so the fresh CLI process is
   // re-oriented ("you were previously running…") instead of treated as brand new.
-  const initialPrompt = opts?.reconnect ? buildReconnectPrompt(config, projectRoot) : buildInitialPrompt(config, projectRoot)
+  const initialPrompt = opts?.reconnect ? buildReconnectPrompt(config, projectRoot, reconnectExtra) : buildInitialPrompt(config, projectRoot)
   initialPrompts.set(config.id, initialPrompt)
   // Block prompt injection until CLI commands are sent
   hasReceivedInitialPrompt.add(config.id)
@@ -1801,7 +1882,8 @@ function spawnProposalAgents(proposal: TeamProposal): { spawned: number; total: 
       skills: a.skills,
       tabId,
       theme: a.theme,
-      worktree: a.worktree ?? defaultWorktreeForRole(a.role, a.cli)
+      worktree: a.worktree ?? defaultWorktreeForRole(a.role, a.cli),
+      spawnAsleep: a.spawnAsleep || undefined
     }
     try {
       handleSpawnAgent(config)
@@ -1925,8 +2007,162 @@ function teardownAgent(managed: ManagedPty): void {
   initialPrompts.delete(id)
   hasReceivedInitialPrompt.delete(id)
   agents.delete(id)
+  forgetIdle(managed.config.tabId, id)
   mainWindow?.webContents.send(IPC.AGENT_CLOSED_REMOTE, { agentId: id })
   mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+}
+
+// Drop a departed agent's idle clock so a later spawn/wake starts fresh.
+function forgetIdle(tabId: string | undefined, id: string): void {
+  contextRegistry.resolveForSpawn(tabId)?.sleepManager?.forget(id)
+}
+
+// Hibernate a live agent: free its PTY but keep its registry entry (status
+// 'sleeping'), roster row, worktree and queued nudges, so wakeAgent can resume
+// its session later. Synchronous so the sleep tick / nudge delivery can call it.
+function sleepAgent(id: string, reason: 'idle' | 'memory' | 'user'): { ok: true } | { ok: false; error: string } {
+  const managed = agents.get(id)
+  if (!managed) return { ok: false, error: 'Agent is not running' }
+  const { config } = managed
+  if (!config.sessionStarted || !canSleep(
+    { cli: config.cli, role: config.role, sessionStarted: !!config.sessionStarted, neverSleep: !!config.neverSleep },
+    reason !== 'user'
+  )) return { ok: false, error: `"${config.name}" cannot sleep (no resumable session or excluded from sleep)` }
+
+  const hadManualKill = manualKills.has(id)
+  manualKills.add(id) // the PTY exit must not auto-reconnect
+  cancelSessionDiscovery(id)
+  sleepingOutput.set(id, managed.outputBuffer.getLines(1000))
+  // Mark asleep before the kill so the PTY's onExit leaves the status alone.
+  config.sleeping = true
+  config.sleptAt = new Date().toISOString()
+  try {
+    killPty(managed)
+  } catch (err: any) {
+    const error = err?.message ?? String(err)
+    // Still running: undo the sleep marks so it stays a normal awake agent.
+    config.sleeping = false
+    delete config.sleptAt
+    if (!hadManualKill) manualKills.delete(id)
+    sleepingOutput.delete(id)
+    postSleepNote(config, `Could not put "${config.name}" to sleep: ${error}`)
+    return { ok: false, error }
+  }
+  // Config files are per agent id: remove them now, not in the async onExit,
+  // which could otherwise delete the files a quick wake just wrote.
+  if (config.cli === 'pi') cleanupPiAgentDir(piAgentDir(id))
+  else if (managed.mcpConfigPath) cleanupConfig(managed.mcpConfigPath)
+  agents.delete(id)
+  forgetIdle(config.tabId, id)
+  persistAgentConfig(config)
+  hubForConfig(config).registry.markSleeping(config.name, config.sleptAt)
+  // Queued nudges stay queued for the wake; only the delivery timer goes.
+  const fallbackTimer = nudgeFallbackTimers.get(config.name)
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer)
+    nudgeFallbackTimers.delete(config.name)
+  }
+  console.log(`Agent "${config.name}" went to sleep (${reason})`)
+  mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+  return { ok: true }
+}
+
+// Roster row of a (sleeping) agent, from whichever live context holds it.
+function findRosterConfig(id: string): AgentConfig | undefined {
+  for (const wsId of contextRegistry.ids()) {
+    const cfg = contextRegistry.get(wsId)?.stores.roster.list().find(c => c.id === id)
+    if (cfg) return cfg
+  }
+  return undefined
+}
+
+// Sleeping roster row matching an id or (case-insensitive) name. With a
+// tabId, the agent's own workspace is authoritative: a name it knows (asleep
+// or awake) never falls through to a same-named agent in another workspace.
+function findSleepingConfig(nameOrId: string, tabId?: string | null): AgentConfig | undefined {
+  const lower = nameOrId.toLowerCase()
+  const matches = (c: AgentConfig): boolean => c.id === nameOrId || c.name.toLowerCase() === lower
+  const own = tabId ? contextRegistry.get(tabId) : undefined
+  if (own) {
+    const row = own.stores.roster.list().find(matches)
+    if (row) return row.sleeping === true ? row : undefined
+  }
+  for (const wsId of contextRegistry.ids()) {
+    const cfg = contextRegistry.get(wsId)?.stores.roster.list()
+      .find(c => c.sleeping === true && matches(c))
+    if (cfg) return cfg
+  }
+  return undefined
+}
+
+// A sleeping roster row exists for this agent id (schedules keep it alive).
+function rosterHasSleeping(id: string): boolean {
+  return findSleepingConfig(id)?.id === id
+}
+
+// teardownAgent for a sleeper (no PTY): drop roster row, registry entry,
+// queued nudges and frozen output, and release its worktree.
+function teardownSleepingAgent(cfg: AgentConfig): void {
+  const { id, name } = cfg
+  const ctx = contextRegistry.resolveForSpawn(cfg.tabId)
+  const h = ctx?.hub ?? hub
+  ctx?.stores.roster.remove(id)
+  h.registry.remove(name)
+  h.messages.clearAgent(name)
+  pendingNudges.delete(name)
+  lastNudgeDelivery.delete(name)
+  const fallbackTimer = nudgeFallbackTimers.get(name)
+  if (fallbackTimer) {
+    clearTimeout(fallbackTimer)
+    nudgeFallbackTimers.delete(name)
+  }
+  sleepingOutput.delete(id)
+  if (cfg.worktreePath) releaseWorktreeWithNotes(cfg, cfg.projectRoot ?? cfg.cwd)
+  mainWindow?.webContents.send(IPC.AGENT_CLOSED_REMOTE, { agentId: id })
+  mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+}
+
+// Bring a sleeping agent back: resume its session (or start it for the first
+// time when it was spawned asleep). On failure it stays asleep with a note.
+function wakeAgent(id: string, reason: 'task' | 'user' | 'schedule'): { ok: true } | { ok: false; error: string } {
+  if (agents.has(id)) return { ok: true }
+  const cfg = findRosterConfig(id)
+  if (!cfg) return { ok: false, error: 'Agent not found' }
+  if (!cfg.sleeping) return { ok: false, error: 'Agent is not asleep' }
+  const h = hubForConfig(cfg)
+  const sleptAt = cfg.sleptAt ?? new Date().toISOString()
+  h.registry.markWaking(cfg.name)
+  mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+  // Awake before the spawn so it registers as idle and the roster saves it awake.
+  cfg.sleeping = false
+  delete cfg.sleptAt
+  try {
+    if (cfg.sessionStarted) {
+      handleSpawnAgent(cfg, {
+        reconnect: true,
+        onWorktree: (r) => reconnectWorktreeNote(r).replace('<slug>', agentSlug(cfg.name))
+      })
+    } else {
+      handleSpawnAgent(cfg, { wake: true })
+    }
+    // The spawn re-registered it as 'idle': keep the card on 'waking' until
+    // the new PTY's first status change (onStatusChange) replaces it.
+    h.registry.markWaking(cfg.name)
+    mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+  } catch (err: any) {
+    const error = err?.message ?? String(err)
+    cfg.sleeping = true
+    cfg.sleptAt = sleptAt
+    persistAgentConfig(cfg)
+    h.registry.markSleeping(cfg.name, sleptAt)
+    postSleepNote(cfg, `Could not wake "${cfg.name}": ${error}`)
+    mainWindow?.webContents.send(IPC.AGENT_STATE_UPDATE, getVisibleAgents())
+    return { ok: false, error }
+  }
+  persistAgentConfig(cfg)
+  sleepingOutput.delete(id)
+  console.log(`Agent "${cfg.name}" woke up (${reason})`)
+  return { ok: true }
 }
 
 // Deliver a nudge to an agent's PTY.
@@ -1935,7 +2171,46 @@ function teardownAgent(managed: ManagedPty): void {
 // trigger StatusDetector's prompt regex, so 'active' is never reached.
 const NUDGE_FALLBACK_DELAY = 5000
 
-function deliverNudge(agentName: string, nudge: string): void {
+// Registry entry of a sleeping or waking agent, searched across every live
+// workspace hub (a sleeper's entry lives on its own workspace's hub). With a
+// tabId, the agent's own workspace hub answers first: if it knows the name,
+// its answer stands and no other workspace's same-named agent is considered.
+function sleepStateOf(agentName: string, tabId?: string | null): { status: 'sleeping' | 'waking'; id: string } | undefined {
+  const asSleepState = (state: AgentState | undefined): { status: 'sleeping' | 'waking'; id: string } | undefined =>
+    state && (state.status === 'sleeping' || state.status === 'waking') ? { status: state.status, id: state.id } : undefined
+  const ownHub = tabId ? contextRegistry.get(tabId)?.hub : undefined
+  const own = ownHub?.registry.get(agentName)
+  if (own) return asSleepState(own)
+  const hubs = [hub, ...contextRegistry.ids().map(wsId => contextRegistry.get(wsId)?.hub)]
+  for (const h of hubs) {
+    const state = asSleepState(h?.registry.get(agentName))
+    if (state) return state
+  }
+  return undefined
+}
+
+// Queue a nudge for an agent whose CLI is not ready (asleep or waking); no
+// fallback timer, flushPendingNudges delivers it once the CLI is ready.
+function queueNudge(agentName: string, nudge: string): void {
+  if (!pendingNudges.has(agentName)) pendingNudges.set(agentName, [])
+  pendingNudges.get(agentName)!.push(nudge)
+}
+
+function deliverNudge(agentName: string, nudge: string, opts: { wake?: boolean; tabId?: string | null } = {}): void {
+  // Sleeping or waking: queue only (no fallback timer). flushPendingNudges
+  // delivers it once the woken CLI is ready. Only a sleeping agent is woken,
+  // and only when asked (tasks); a waking one never gets a second wake.
+  const asleep = sleepStateOf(agentName, opts.tabId)
+  if (asleep) {
+    queueNudge(agentName, nudge)
+    if (opts.wake && asleep.status === 'sleeping') {
+      const id = findSleepingConfig(agentName, opts.tabId)?.id ?? asleep.id
+      const woke = wakeAgent(id, 'task')
+      if (!woke.ok) console.warn(`[sleep] could not wake "${agentName}" for a task: ${woke.error}`)
+    }
+    return
+  }
+
   const managed = Array.from(agents.values()).find(a => a.config.name === agentName)
   if (!managed) return
 
@@ -2065,7 +2340,7 @@ function setupMessageNudge(hub: HubServer, workspaceId: string): void {
     if (!target) return
 
     const nudge = `[Cog] New message from "${msg.from}". You MUST call get_messages() now to read it, then act on it immediately.`
-    deliverNudge(msg.to, nudge)
+    deliverNudge(msg.to, nudge, { tabId: workspaceId })
   }
 }
 
@@ -2079,34 +2354,46 @@ function setupTaskNudge(hub: HubServer): void {
     // Skip the agent that created the task — nudging the creator while it's still
     // processing the post_task tool response can cause TUI CLIs to re-render their
     // entire conversation history (cosmetic but confusing).
-    if (task.targetAgent) {
-      const managed = Array.from(agents.values()).find(m => m.config.name === task.targetAgent)
-      if (managed) {
-        const nudge = `[Cog] New task posted for you: "${task.title}" (id: ${task.id}) ${task.priority} priority. Claim it now with claim_task("${task.id}") or call read_tasks() to see all open tasks.`
-        deliverNudge(managed.config.name, nudge)
-      }
-      return
-    }
-
-    // Filter agents by targetRole if specified, otherwise nudge all non-orchestrators.
-    // Tab isolation: only nudge agents on the same workspace tab as the task.
-    const candidates = hub.registry.list().filter(agent => {
-      if (agent.status === 'disconnected' || agent.name === 'user') return false
-      if (agent.name === task.createdBy) return false
-      // Tab isolation: only nudge agents on the same tab
-      if (task.tabId && agent.tabId && task.tabId !== agent.tabId) return false
-      if (task.targetRole) {
-        return agent.role === task.targetRole
-      }
-      return agent.role !== 'orchestrator'
-    })
-
+    // Role tasks: filter by targetRole (else all non-orchestrators), same tab only.
+    // routeTaskNudge nudges the awake candidates, or wakes the most recently
+    // slept one when none is awake; a targeted sleeper is woken directly.
     const roleLabel = task.targetRole ? ` for ${task.targetRole}s` : ''
-    for (const agent of candidates) {
-      const nudge = `[Cog] New task posted${roleLabel}: "${task.title}" (id: ${task.id}) ${task.priority} priority. Claim it now with claim_task("${task.id}") or call read_tasks() to see all open tasks.`
-      deliverNudge(agent.name, nudge)
+    const nudge = task.targetAgent
+      ? `[Cog] New task posted for you: "${task.title}" (id: ${task.id}) ${task.priority} priority. Claim it now with claim_task("${task.id}") or call read_tasks() to see all open tasks.`
+      : `[Cog] New task posted${roleLabel}: "${task.title}" (id: ${task.id}) ${task.priority} priority. Claim it now with claim_task("${task.id}") or call read_tasks() to see all open tasks.`
+
+    const registered = hub.registry.list()
+    const route = routeTaskNudge(
+      {
+        id: task.id,
+        title: task.title,
+        createdBy: task.createdBy ?? '',
+        targetAgent: task.targetAgent ?? undefined,
+        targetRole: task.targetRole ?? undefined,
+        tabId: task.tabId ?? undefined
+      },
+      registered.map(toRoutable)
+    )
+    const tabId = task.tabId ?? null
+    for (const name of route.write) deliverNudge(name, nudge, { tabId })
+    // Wake by the routed id, never by name: another workspace may have a
+    // same-named sleeper.
+    for (const id of route.wake) {
+      const name = registered.find(a => a.id === id)?.name ?? findRosterConfig(id)?.name
+      if (!name) continue
+      if (agents.has(id)) {
+        deliverNudge(name, nudge, { tabId })
+        continue
+      }
+      queueNudge(name, nudge)
+      const woke = wakeAgent(id, 'task')
+      if (!woke.ok) console.warn(`[sleep] could not wake "${name}" for a task: ${woke.error}`)
     }
   }
+}
+
+function toRoutable(a: AgentState): RoutableAgent {
+  return { id: a.id, name: a.name, role: a.role, tabId: a.tabId, status: a.status, sleptAt: a.sleptAt }
 }
 
 // When info is posted, nudge orchestrator agents so they know to read it.
@@ -2255,6 +2542,7 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
   const boardStore = new BoardStore(db)
   const boardAppearanceStore = new BoardAppearanceStore(db)
   const rosterStore = new AgentRosterStore(db)
+  const sleepStore = new SleepSettingsStore(db)
 
   const hub = await createHubServer(0, () => scheduleBridge ?? undefined, () => boardBridge ?? undefined, () => agentBridge ?? undefined)
   hub.setProjectPath(projectPath)
@@ -2429,7 +2717,11 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
 
   hub.setOutputAccessor((agentName, lines) => {
     const managed = Array.from(agents.values()).find(a => a.config.name === agentName)
-    if (!managed) return null
+    if (!managed) {
+      const sleeperId = hub.registry.get(agentName)?.id
+      const frozen = sleeperId ? sleepingOutput.get(sleeperId) : undefined
+      return frozen ? frozen.slice(-lines) : null
+    }
     return managed.outputBuffer.getLines(lines)
   })
   // Per-context nudge wiring: each hub delivers task/message/info nudges to its
@@ -2450,10 +2742,19 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
     clock: () => Date.now(),
     ptyWriter: (agentId, text) => {
       const managed = agents.get(agentId)
-      if (!managed) throw new Error(`Agent ${agentId} not found`)
+      if (!managed) {
+        // A sleeping agent keeps its schedules: queue the prompt (no wake);
+        // it is delivered when a task or the user wakes the agent.
+        const sleeper = findSleepingConfig(agentId)
+        if (sleeper) {
+          deliverNudge(sleeper.name, text)
+          return
+        }
+        throw new Error(`Agent ${agentId} not found`)
+      }
       writeNudgeToPty(managed, text)
     },
-    agentLookup: (agentId) => agents.has(agentId),
+    agentLookup: (agentId) => agents.has(agentId) || rosterHasSleeping(agentId),
     onChange: () => {
       if (!promptScheduler) return
       sendToUi(IPC.SCHEDULES_UPDATED, promptScheduler.list())
@@ -2533,8 +2834,10 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
       const managed = [...agents.values()].find(
         m => m.config.id === nameOrId || m.config.name.toLowerCase() === nameOrId.toLowerCase()
       )
-      if (!managed) return { ok: false }
-      teardownAgent(managed)
+      if (managed) { teardownAgent(managed); return { ok: true } }
+      const sleeper = findSleepingConfig(nameOrId)
+      if (!sleeper) return { ok: false }
+      teardownSleepingAgent(sleeper)
       return { ok: true }
     }
   }
@@ -2542,6 +2845,60 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
   // Topics mode: open (or reopen) this workspace's forum thread. No-op in dm
   // mode / when telegram is off (ensureTopic self-guards).
   void telegramServer?.ensureTopic(workspaceId, path.basename(projectPath))
+
+  // Hibernation tick for THIS context's agents only (matched by effective tabId).
+  const sleepManager: SleepManager = new SleepManager({
+    settings: () => sleepStore.get(),
+    candidates: () => {
+      const out: SleepCandidate[] = []
+      for (const managed of agents.values()) {
+        const c = managed.config
+        if ((c.tabId || DEFAULT_WORKSPACE_ID) !== workspaceId) continue
+        out.push({
+          id: c.id, name: c.name, role: c.role, cli: c.cli,
+          status: managed.statusDetector.status,
+          idleSince: sleepManager.idleSince(c.id),
+          sessionStarted: !!c.sessionStarted,
+          neverSleep: !!c.neverSleep,
+          worktreePath: c.worktreePath
+        })
+      }
+      return out
+    },
+    pendingNudgeNames: () => new Set(
+      [...pendingNudges.entries()].filter(([, q]) => q.length > 0).map(([name]) => name)
+    ),
+    inProgressTaskAgents: () => new Set(
+      hub.pinboard.readTasks()
+        .filter((t) => t.status === 'in_progress' && t.claimedBy)
+        .map((t) => t.claimedBy as string)
+    ),
+    promptNotInjectedIds: () => new Set(
+      [...agents.values()]
+        .filter((m) => (m.config.tabId || DEFAULT_WORKSPACE_ID) === workspaceId && !hasReceivedInitialPrompt.has(m.config.id))
+        .map((m) => m.config.id)
+    ),
+    freeMemMb: () => os.freemem() / 1048576,
+    sleep: (id, reason) => { sleepAgent(id, reason) },
+    postMemoryNote: () => {
+      try {
+        const orch = [...agents.values()].find(
+          (m) => (m.config.tabId || DEFAULT_WORKSPACE_ID) === workspaceId && (m.config.role || '').toLowerCase() === 'orchestrator'
+        )?.config
+        hub.inboxChannel.postMessage(
+          orch?.id ?? 'system', orch?.name ?? 'system',
+          'Memory below floor and every awake agent is working; nobody was put to sleep.',
+          'normal', ['sleep'], orch?.tabId ?? workspaceId
+        )
+      } catch { /* inbox unavailable */ }
+    }
+  })
+  sleepManager.start()
+
+  // Sleepers have no process to respawn: register them now, whatever the
+  // respawn mode, so they show as cards, answer get_agents, can be woken or
+  // closed, and keep their slug reserved.
+  for (const cfg of sleepingRosterRows(rosterStore.list())) hub.registry.register(cfg)
 
   return {
     workspaceId,
@@ -2558,12 +2915,14 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
       autonomy: autonomyStore,
       board: boardStore,
       boardAppearance: boardAppearanceStore,
-      roster: rosterStore
+      roster: rosterStore,
+      sleep: sleepStore
     },
     promptScheduler,
     scheduleBridge: scheduleBridge!,
     boardBridge: boardBridge!,
-    agentBridge: agentBridge!
+    agentBridge: agentBridge!,
+    sleepManager
   }
 }
 
@@ -2607,8 +2966,15 @@ function agentRespawnMode(): 'all' | 'active' | 'none' {
  */
 function respawnRosterFor(ctx: WorkspaceCtx): void {
   respawnedRosters.add(ctx.workspaceId)
-  for (const cfg of ctx.stores.roster.list()) {
-    if (agents.has(cfg.id)) continue // already running
+  // Sleepers were registered when the context was created; register only the
+  // missing ones (idempotent), never spawn them. Their card shows asleep, no PTY.
+  const plan = planRosterRespawn(
+    ctx.stores.roster.list(),
+    (id) => agents.has(id),
+    (name) => !!ctx.hub.registry.get(name)
+  )
+  for (const cfg of plan.register) ctx.hub.registry.register(cfg)
+  for (const cfg of plan.spawn) {
     try {
       handleSpawnAgent(cfg, { reconnect: true })
     } catch (err: any) {
@@ -2728,8 +3094,10 @@ function closeCtxResources(id: string, ctx: WorkspaceCtx): void {
     initialPrompts.delete(agentId)
     hasReceivedInitialPrompt.delete(agentId)
     agents.delete(agentId)
+    forgetIdle(managed.config.tabId, agentId)
   }
   try { ctx.promptScheduler.stopTicker() } catch { /* noop */ }
+  ctx.sleepManager.stop()
   ctx.hub.close()
   try { ctx.db.close() } catch { /* already closed */ }
   // Clear the respawn mark so reopening this workspace respawns its roster
@@ -2817,7 +3185,7 @@ function setupIPC(): void {
   // Respawn an agent with a new config — kills the old PTY, wipes history, spawns fresh
   ipcMain.handle(IPC.AGENT_RESPAWN, async (_event, agentId: string, newConfigInput: Omit<AgentConfig, 'id'>): Promise<RespawnResult> => {
     const managed = agents.get(agentId)
-    if (!managed) return { ok: false, error: 'AGENT_NOT_FOUND' }
+    if (!managed) return { ok: false, error: findRosterConfig(agentId)?.sleeping ? 'AGENT_ASLEEP' : 'AGENT_NOT_FOUND' }
 
     const currentConfig = managed.config
     const otherAgentNames = hub.registry.list().map(a => a.name)
@@ -2873,6 +3241,7 @@ function setupIPC(): void {
     initialPrompts.delete(agentId)
     hasReceivedInitialPrompt.delete(agentId)
     agents.delete(agentId)
+    forgetIdle(managed.config.tabId, agentId)
 
     // Spawn fresh with new config — preserve agent.id so window position state survives
     const mergedConfig: AgentConfig = {
@@ -2887,6 +3256,8 @@ function setupIPC(): void {
       // History wipe: never carry the old session into the new config.
       sessionId: undefined,
       sessionStarted: undefined,
+      // Spawn asleep is creation-only: an edit must start the agent awake.
+      spawnAsleep: undefined,
     }
 
     try {
@@ -2899,7 +3270,18 @@ function setupIPC(): void {
 
   ipcMain.handle(IPC.KILL_AGENT, (_event, agentId: string) => {
     const managed = agents.get(agentId)
-    if (managed) teardownAgent(managed)
+    if (managed) { teardownAgent(managed); return }
+    const sleeper = findSleepingConfig(agentId)
+    if (sleeper) teardownSleepingAgent(sleeper)
+  })
+
+  ipcMain.handle(IPC.AGENT_SLEEP, (_event, agentId: string) => sleepAgent(agentId, 'user'))
+  ipcMain.handle(IPC.AGENT_WAKE, (_event, agentId: string) => wakeAgent(agentId, 'user'))
+  ipcMain.handle(IPC.SLEEP_SETTINGS_GET, () => contextRegistry.getActive()?.stores.sleep.get() ?? DEFAULT_SLEEP_SETTINGS)
+  ipcMain.handle(IPC.SLEEP_SETTINGS_SET, (_event, patch: Partial<SleepSettings>) => {
+    const ctx = contextRegistry.getActive()
+    if (!ctx) throw new Error('No active workspace')
+    return ctx.stores.sleep.set(patch)
   })
 
   ipcMain.handle('pty:resize', (_event, agentId: string, cols: number, rows: number) => {
@@ -3274,7 +3656,8 @@ function setupIPC(): void {
         providerUrl: a.providerUrl,
         skills: a.skills,
         tabId,
-        theme: a.theme
+        theme: a.theme,
+        spawnAsleep: a.spawnAsleep || undefined
       }
       try {
         const result = handleSpawnAgent(config)
