@@ -58,6 +58,31 @@ describe('StatusDetector', () => {
     expect(onChange).toHaveBeenCalledWith('active')
   })
 
+  it('reaches active when the prompt line is followed by a status line in the same redraw (Claude Code TUI)', () => {
+    const onChange = vi.fn()
+    const detector = new StatusDetector({ onChange })
+    detector.onData('❯ \n⏵⏵ bypass permissions on | worker-1 | ⎇ cog/worker-1 | ctx:8%')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('active')
+    expect(onChange).toHaveBeenLastCalledWith('active')
+  })
+
+  it('remembers a prompt line seen in an earlier chunk when later chunks only repaint the status line', () => {
+    const detector = new StatusDetector()
+    detector.onData('❯ ')
+    vi.advanceTimersByTime(500)
+    detector.onData('Cooked for 19s · done 04:22')
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('active')
+  })
+
+  it('stays working when no prompt line is anywhere in the recent output', () => {
+    const detector = new StatusDetector()
+    for (let i = 0; i < 20; i++) detector.onData(`spinner frame ${i}\nstatus line ${i}`)
+    vi.advanceTimersByTime(2500)
+    expect(detector.status).toBe('working')
+  })
+
   it('transitions to disconnected on exit', () => {
     const detector = new StatusDetector()
     detector.onExit()
