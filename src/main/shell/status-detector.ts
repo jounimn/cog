@@ -18,7 +18,9 @@ interface StatusDetectorOptions {
   onClearDetected?: () => void
 }
 
-const RECENT_LINES = 12
+// Enough normalised text to hold one full TUI repaint (the prompt line plus
+// whatever the CLI draws under it), while spinner frames stream past.
+const RECENT_CHARS = 4000
 
 export class StatusDetector {
   private _status: AgentStatus = 'idle'
@@ -26,7 +28,7 @@ export class StatusDetector {
   private silenceMs: number
   private silenceTimer: ReturnType<typeof setTimeout> | null = null
   private lastLineMatchedPrompt = false
-  private recentLines: string[] = []
+  private recentText = ''
   private onChange?: (status: AgentStatus) => void
   private onClearDetected?: () => void
   private awaitingPromptAfterClear = false
@@ -51,11 +53,11 @@ export class StatusDetector {
       this.awaitingPromptAfterClear = true
     }
     // TUI CLIs repaint with cursor moves, so the last line of a chunk is
-    // usually a status line or spinner frame, not the input prompt. Keep a
-    // short window of recent lines and treat the prompt as visible when any
-    // of them matches; silence then means "waiting at the prompt".
-    this.recentLines = [...this.recentLines, ...lines].slice(-RECENT_LINES)
-    this.lastLineMatchedPrompt = this.recentLines.some(line => this.promptRegex.test(line))
+    // usually a status line or spinner frame, not the input prompt. Keep the
+    // recent normalised text and treat the prompt as visible when any line in
+    // it matches; silence then means "waiting at the prompt".
+    this.recentText = (this.recentText + '\n' + clean).slice(-RECENT_CHARS)
+    this.lastLineMatchedPrompt = this.recentText.split('\n').some(line => line.trim().length > 0 && this.promptRegex.test(line))
 
     if (this.silenceTimer) clearTimeout(this.silenceTimer)
     this.silenceTimer = setTimeout(() => {

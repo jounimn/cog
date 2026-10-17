@@ -1570,11 +1570,12 @@ function spawnPtyAndWire(
       }
     },
     onStatusChange: (status) => {
-      // The detector reports 'disconnected' when the PTY dies. For a sleeping
-      // agent that would overwrite the registry's 'sleeping' (and hide it from
-      // task routing); for a slept PTY that a wake already replaced it would
-      // clobber the new one's status.
-      if (status === 'disconnected' && (config.sleeping || (agents.has(config.id) && agents.get(config.id) !== managed))) return
+      // A sleeping agent's PTY still reports its last bytes ('working') and its
+      // exit ('disconnected') after markSleeping; either would overwrite the
+      // registry's 'sleeping' and hide it from task routing and message
+      // queueing. A slept PTY that a wake already replaced would clobber the
+      // new one's status. Ignore everything from such a PTY.
+      if (config.sleeping || (agents.has(config.id) && agents.get(config.id) !== managed)) return
       h.registry.updateStatus(config.name, status)
       contextRegistry.resolveForSpawn(config.tabId)?.sleepManager?.noteStatus(config.id, status)
       if (contextRegistry.isActive(spawnTab)) {

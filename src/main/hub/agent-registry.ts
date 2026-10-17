@@ -66,6 +66,10 @@ export class AgentRegistry extends EventEmitter {
 
   updateStatus(name: string, status: AgentStatus): void {
     const agent = this.agents.get(name)
+    // A sleeping agent has no live process; late PTY output or exit must not
+    // replace 'sleeping' (task routing and message queueing key off it).
+    // markWaking and register are the only ways out of that state.
+    if (agent?.sleeping) return
     if (agent && agent.status !== status) {
       agent.status = status
       this.emit('status', { name, status })
