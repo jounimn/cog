@@ -256,6 +256,26 @@ describe('buildCliLaunchCommands — session persistence', () => {
     expect(launch({ autoMode: true, permissionMode: 'plan' }, resume)).toEqual([`claude --mcp-config "${MCP}" --dangerously-skip-permissions --resume ${SID}`])
   })
 
+  it('claude: with the off-settings path, the orchestrator gets a named Remote Control and others get it turned off', () => {
+    const OFF = 'C:\\tmp\\cog-claude-remote-control-off.json'
+    const withRc = (over: Partial<AgentConfig>, s: Parameters<typeof buildCliLaunchCommands>[6]) =>
+      buildCliLaunchCommands(makeConfig(over), MCP, SRV, 7777, 'secret', false, s, OFF)
+    expect(withRc({ role: 'orchestrator', name: 'orchestrator', autoMode: true }, resume)).toEqual([
+      `claude --mcp-config "${MCP}" --dangerously-skip-permissions --remote-control "repo / orchestrator" --resume ${SID}`
+    ])
+    expect(withRc({ role: 'worker' }, fresh)).toEqual([`claude --mcp-config "${MCP}" --settings "${OFF}" --session-id ${SID}`])
+    expect(withRc({ role: 'worker', remoteControl: true }, fresh)).toEqual([
+      `claude --mcp-config "${MCP}" --remote-control "repo / worker-1" --session-id ${SID}`
+    ])
+    // Without the path nothing changes (the user's own settings decide).
+    expect(launch({ role: 'orchestrator' }, fresh)).toEqual([`claude --mcp-config "${MCP}" --session-id ${SID}`])
+  })
+
+  it('claude under WSL hands the off-settings file over as a /mnt path', () => {
+    expect(buildCliLaunchCommands(makeConfig({ shell: 'wsl' }), MCP, SRV, 7777, 'secret', false, fresh, 'C:\\tmp\\off.json'))
+      .toEqual([`claude --mcp-config "/mnt/c/temp/agentorch-mcp.json" --settings "/mnt/c/tmp/off.json" --session-id ${SID}`])
+  })
+
   it('openclaude mirrors the claude flags', () => {
     expect(launch({ cli: 'openclaude' }, fresh)).toEqual([`openclaude --mcp-config "${MCP}" --session-id ${SID}`])
     expect(launch({ cli: 'openclaude' }, resume)).toEqual([`openclaude --mcp-config "${MCP}" --resume ${SID}`])

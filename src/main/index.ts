@@ -1638,7 +1638,10 @@ function spawnPtyAndWire(
   // behaviour without threading a flag through.
   const session = resolveSessionLaunch(config)
   if (session?.resume) console.log(`Agent "${config.name}": resuming ${config.cli} session ${session.kind === 'id' ? session.id : session.dir}`)
-  const cmds = buildCliLaunchCommands(config, mcpConfigPath, mcpServerPath, h.port, h.secret, ensurePiAdapter, session)
+  // Remote Control: on for the orchestrator, off for everyone else (the
+  // user's remoteControlAtStartup would otherwise start one per agent).
+  const rcOffSettings = config.cli === 'claude' ? ensureRemoteControlOffSettings() : undefined
+  const cmds = buildCliLaunchCommands(config, mcpConfigPath, mcpServerPath, h.port, h.secret, ensurePiAdapter, session, rcOffSettings)
   if (ensurePiAdapter) piAdapterEnsured = true
   if (cmds) {
     let delay = 1000
