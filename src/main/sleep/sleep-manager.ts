@@ -8,6 +8,8 @@ export interface SleepManagerDeps {
   pendingNudgeNames: () => Set<string>
   /** Pinboard tasks with status 'in_progress' -> claimedBy. */
   inProgressTaskAgents: () => Set<string>
+  /** Pinboard tasks with status 'open' and a targetAgent -> that name, lower-cased. */
+  openTargetedTaskAgents: () => Set<string>
   /** Ids not yet in hasReceivedInitialPrompt. */
   promptNotInjectedIds: () => Set<string>
   /** os.freemem() / 1048576 */
@@ -74,6 +76,7 @@ export class SleepManager {
       lowMemStreak: this.lowMemStreak,
       pendingNudgeNames: this.deps.pendingNudgeNames(),
       inProgressTaskAgents: this.deps.inProgressTaskAgents(),
+      openTargetedTaskAgents: this.deps.openTargetedTaskAgents(),
       promptNotInjectedIds: this.deps.promptNotInjectedIds(),
       lastMemoryNoteAt: this.lastMemoryNoteAt
     })

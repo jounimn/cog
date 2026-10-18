@@ -1,5 +1,6 @@
 import type { AgentConfig } from '../shared/types'
 import { isShellSafeSessionId, type SessionLaunch } from './agent-session'
+import { permissionModeArgs } from './shell/permission-mode'
 
 // ── Input validation for values that get spliced into shell command strings ──
 //
@@ -138,7 +139,7 @@ export function buildCliLaunchCommands(
   if (cliBase === 'claude') {
     const parts = [`claude --mcp-config "${mcpConfigArg}"`]
     if (safeModel) parts[0] += ` --model ${safeModel}`
-    if (config.autoMode) parts[0] += ' --dangerously-skip-permissions'
+    parts[0] += permissionModeArgs(config)
     if (sessionId) parts[0] += resume ? ` --resume ${sessionId}` : ` --session-id ${sessionId}`
     return parts
   }
@@ -147,7 +148,7 @@ export function buildCliLaunchCommands(
     // Community fork of Claude Code; mirrors its session flags.
     const parts = [`openclaude --mcp-config "${mcpConfigArg}"`]
     if (safeModel) parts[0] += ` --model ${safeModel}`
-    if (config.autoMode) parts[0] += ' --dangerously-skip-permissions'
+    parts[0] += permissionModeArgs(config)
     if (sessionId) parts[0] += resume ? ` --resume ${sessionId}` : ` --session-id ${sessionId}`
     return parts
   }

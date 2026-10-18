@@ -15,6 +15,7 @@ import { createHubServer, type HubServer } from './hub/server'
 import type { ScheduleBridge, BoardBridge, AgentBridge } from './hub/routes'
 import { spawnAgentPty, writeToPty, resizePty, killPty, type ManagedPty } from './shell/pty-manager'
 import { submitUntilAccepted } from './shell/submit-timing'
+import { detectPermissionMode, mayCarryPermissionMode } from './shell/permission-mode'
 import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig } from './cli-launch'
 import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir } from './mcp/config-writer'
 import { savePreset, loadPreset, listPresets, deletePreset, setPresetsDir } from './presets/preset-manager'
@@ -1548,6 +1549,15 @@ function spawnPtyAndWire(
     extraEnv: mcpEnv,
     projectRoot,
     onData: (data) => {
+      // Remember the permission mode the user picks with shift+tab so a wake
+      // or restart respawn (--resume) comes back in it, not in default mode.
+      if ((config.cli === 'claude' || config.cli === 'openclaude') && mayCarryPermissionMode(data)) {
+        const mode = detectPermissionMode(data)
+        if (mode && mode !== config.permissionMode) {
+          config.permissionMode = mode
+          persistAgentConfig(config)
+        }
+      }
       mainWindow.webContents.send(IPC.PTY_OUTPUT, config.id, data)
       // Forward to mobile WS subscribers. No-op when nobody is watching
       // this agent's detail view — pushAgentOutput pre-filters.
@@ -2856,6 +2866,11 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
       hub.pinboard.readTasks()
         .filter((t) => t.status === 'in_progress' && t.claimedBy)
         .map((t) => t.claimedBy as string)
+    ),
+    openTargetedTaskAgents: () => new Set(
+      hub.pinboard.readTasks()
+        .filter((t) => t.status === 'open' && t.targetAgent)
+        .map((t) => (t.targetAgent as string).toLowerCase())
     ),
     promptNotInjectedIds: () => new Set(
       [...agents.values()]

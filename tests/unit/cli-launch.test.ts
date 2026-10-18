@@ -249,6 +249,13 @@ describe('buildCliLaunchCommands — session persistence', () => {
     expect(launch({ autoMode: true }, resume)).toEqual([`claude --mcp-config "${MCP}" --dangerously-skip-permissions --resume ${SID}`])
   })
 
+  it('claude: a resumed session gets back the permission mode the user picked in the terminal', () => {
+    expect(launch({ autoMode: false, permissionMode: 'acceptEdits' }, resume)).toEqual([`claude --mcp-config "${MCP}" --permission-mode acceptEdits --resume ${SID}`])
+    expect(launch({ autoMode: false, permissionMode: 'bypassPermissions' }, resume)).toEqual([`claude --mcp-config "${MCP}" --dangerously-skip-permissions --resume ${SID}`])
+    expect(launch({ autoMode: false, permissionMode: 'default' }, resume)).toEqual([`claude --mcp-config "${MCP}" --resume ${SID}`])
+    expect(launch({ autoMode: true, permissionMode: 'plan' }, resume)).toEqual([`claude --mcp-config "${MCP}" --dangerously-skip-permissions --resume ${SID}`])
+  })
+
   it('openclaude mirrors the claude flags', () => {
     expect(launch({ cli: 'openclaude' }, fresh)).toEqual([`openclaude --mcp-config "${MCP}" --session-id ${SID}`])
     expect(launch({ cli: 'openclaude' }, resume)).toEqual([`openclaude --mcp-config "${MCP}" --resume ${SID}`])

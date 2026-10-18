@@ -23,6 +23,12 @@ export interface SleepPolicyInput {
   lowMemStreak: number
   pendingNudgeNames: Set<string>
   inProgressTaskAgents: Set<string>
+  /**
+   * Lower-cased names of agents with an OPEN task posted directly to them.
+   * The nudge for such a task was already delivered while the agent was
+   * awake; if it slept now, nothing would ever wake it for that task.
+   */
+  openTargetedTaskAgents: Set<string>
   promptNotInjectedIds: Set<string>
   lastMemoryNoteAt: number | null
 }
@@ -57,6 +63,7 @@ export function pickAgentsToSleep(input: SleepPolicyInput): SleepDecision {
       canSleep(a, true) &&
       !input.pendingNudgeNames.has(a.name) &&
       !input.inProgressTaskAgents.has(a.name) &&
+      !input.openTargetedTaskAgents.has(a.name.toLowerCase()) &&
       !input.promptNotInjectedIds.has(a.id)
   )
 
