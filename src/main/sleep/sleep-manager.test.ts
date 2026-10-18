@@ -16,6 +16,7 @@ function makeDeps(over: Partial<SleepManagerDeps> = {}) {
     candidates: () => [],
     pendingNudgeNames: () => new Set(),
     inProgressTaskAgents: () => new Set(),
+    openTargetedTaskAgents: () => new Set(),
     promptNotInjectedIds: () => new Set(),
     freeMemMb: () => 8000,
     sleep: vi.fn(),

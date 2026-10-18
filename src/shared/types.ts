@@ -44,6 +44,10 @@ export interface AgentConfig {
   shell: 'cmd' | 'powershell' | 'wsl' | 'bash' | 'zsh' | 'fish'  // which shell to spawn the agent in
   admin: boolean
   autoMode: boolean    // --dangerously-skip-permissions (Claude), --yolo (Codex), etc.
+  // Claude Code permission mode last seen in the terminal (bypassPermissions,
+  // auto, acceptEdits, plan, dontAsk, default): what the user picked with
+  // shift+tab. Passed back as --permission-mode on wake / restart respawn.
+  permissionMode?: string
   promptRegex?: string
   model?: string  // e.g. 'claude-fable-5', 'sonnet', 'opus', 'haiku', 'o4-mini', 'gpt-4.1'
   providerUrl?: string  // OpenAI-compatible base URL (for OpenClaude)

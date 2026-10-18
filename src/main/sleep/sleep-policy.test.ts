@@ -17,7 +17,7 @@ function input(over: Partial<SleepPolicyInput> = {}): SleepPolicyInput {
     agents: [agent()], now: NOW,
     settings: { enabled: true, sleepAfterMinutes: 10, memoryFloorMb: 1500 },
     freeMemMb: 8000, lowMemStreak: 0,
-    pendingNudgeNames: new Set(), inProgressTaskAgents: new Set(), promptNotInjectedIds: new Set(),
+    pendingNudgeNames: new Set(), inProgressTaskAgents: new Set(), openTargetedTaskAgents: new Set(), promptNotInjectedIds: new Set(),
     lastMemoryNoteAt: null, ...over
   }
 }
@@ -51,6 +51,11 @@ describe('pickAgentsToSleep', () => {
 
   it('defers an agent with an in-progress task', () => {
     expect(pickAgentsToSleep(input({ inProgressTaskAgents: new Set(['alpha']) })).sleep).toEqual([])
+  })
+
+  it('defers an agent with an open task posted directly to it (name match is case-insensitive)', () => {
+    expect(pickAgentsToSleep(input({ openTargetedTaskAgents: new Set(['alpha']) })).sleep).toEqual([])
+    expect(pickAgentsToSleep(input({ openTargetedTaskAgents: new Set(['beta']) })).sleep).toEqual([{ id: 'a1', reason: 'idle' }])
   })
 
   it('defers an agent whose prompt was not injected yet', () => {
