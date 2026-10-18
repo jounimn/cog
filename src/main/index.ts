@@ -16,6 +16,7 @@ import type { ScheduleBridge, BoardBridge, AgentBridge } from './hub/routes'
 import { spawnAgentPty, writeToPty, resizePty, killPty, type ManagedPty } from './shell/pty-manager'
 import { submitUntilAccepted } from './shell/submit-timing'
 import { detectPermissionMode, mayCarryPermissionMode } from './shell/permission-mode'
+import { TerminalSizes, RESET_SCREEN } from './shell/terminal-size'
 import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig } from './cli-launch'
 import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir } from './mcp/config-writer'
 import { savePreset, loadPreset, listPresets, deletePreset, setPresetsDir } from './presets/preset-manager'
@@ -178,6 +179,8 @@ const sleepingOutput = new Map<string, string[]>() // agentId → last output li
 const hasReceivedInitialPrompt = new Set<string>()
 const initialPrompts = new Map<string, string>()
 const manualKills = new Set<string>() // Track intentional kills to skip auto-reconnect
+const terminalSizes = new TerminalSizes() // agentId -> renderer pane size, applied to every spawn
+const spawnedBefore = new Set<string>() // agent ids that already had a PTY in this app run
 const pendingNudges = new Map<string, string[]>() // agentName → queued nudge strings
 // Workspaces (folder-bindable tabs). Persisted; source of truth for the tab bar.
 // Instantiated once userData is available (see app-ready init).
@@ -1543,10 +1546,18 @@ function spawnPtyAndWire(
   const h = hubForConfig(config)
   const spawnTab = config.tabId || DEFAULT_WORKSPACE_ID
 
+  // A respawn (wake, crash reconnect, restart) draws into the renderer
+  // terminal that still shows the dead session's last frame and its "Resume
+  // this session with:" footer. Start it from a clean screen; the first spawn
+  // of an id goes to a fresh terminal anyway.
+  if (spawnedBefore.has(config.id)) mainWindow.webContents.send(IPC.PTY_OUTPUT, config.id, RESET_SCREEN)
+  spawnedBefore.add(config.id)
+
   const managed = spawnAgentPty({
     config,
     mcpConfigPath,
     extraEnv: mcpEnv,
+    ...terminalSizes.get(config.id),
     projectRoot,
     onData: (data) => {
       // Remember the permission mode the user picks with shift+tab so a wake
@@ -3284,6 +3295,8 @@ function setupIPC(): void {
   })
 
   ipcMain.handle('pty:resize', (_event, agentId: string, cols: number, rows: number) => {
+    // Remembered even while the agent sleeps: its next PTY starts at this size.
+    terminalSizes.remember(agentId, cols, rows)
     const managed = agents.get(agentId)
     if (managed) resizePty(managed, cols, rows)
   })
