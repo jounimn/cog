@@ -18,7 +18,7 @@ import { submitUntilAccepted } from './shell/submit-timing'
 import { detectPermissionMode, mayCarryPermissionMode } from './shell/permission-mode'
 import { TerminalSizes, RESET_SCREEN } from './shell/terminal-size'
 import { buildCliLaunchCommands as buildCliLaunchCommandsForConfig } from './cli-launch'
-import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir } from './mcp/config-writer'
+import { writeAgentMcpConfig, writePiAgentConfig, cleanupConfig, cleanupPiAgentDir, piAgentDir, ensureRemoteControlOffSettings } from './mcp/config-writer'
 import { savePreset, loadPreset, listPresets, deletePreset, setPresetsDir } from './presets/preset-manager'
 import { ProjectManager } from './project/project-manager'
 import { SkillManager } from './skills/skill-manager'
@@ -1272,9 +1272,9 @@ function createWindow(): BrowserWindow {
 function buildCliLaunchCommands(
   config: AgentConfig, mcpConfigPath: string, mcpServerPath: string,
   hubPort: number, hubSecret: string, ensurePiAdapter = false,
-  session?: SessionLaunch
+  session?: SessionLaunch, remoteControlOffSettingsPath?: string
 ): string[] | null {
-  return buildCliLaunchCommandsForConfig(config, mcpConfigPath, mcpServerPath, hubPort, hubSecret, ensurePiAdapter, session)
+  return buildCliLaunchCommandsForConfig(config, mcpConfigPath, mcpServerPath, hubPort, hubSecret, ensurePiAdapter, session, remoteControlOffSettingsPath)
 }
 
 // ── Agent session persistence (see agent-session.ts) ────────────────────────
