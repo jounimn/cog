@@ -48,6 +48,9 @@ export interface AgentConfig {
   // auto, acceptEdits, plan, dontAsk, default): what the user picked with
   // shift+tab. Passed back as --permission-mode on wake / restart respawn.
   permissionMode?: string
+  // Claude Code Remote Control (drive the session from claude.ai/code or the
+  // phone). Absent: on for the orchestrator role, off for every other agent.
+  remoteControl?: boolean
   promptRegex?: string
   model?: string  // e.g. 'claude-fable-5', 'sonnet', 'opus', 'haiku', 'o4-mini', 'gpt-4.1'
   providerUrl?: string  // OpenAI-compatible base URL (for OpenClaude)

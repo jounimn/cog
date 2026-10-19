@@ -1,6 +1,7 @@
-import { writeFileSync, unlinkSync, mkdirSync, rmSync } from 'fs'
+import { writeFileSync, unlinkSync, mkdirSync, rmSync, readFileSync } from 'fs'
 import path from 'path'
 import os from 'os'
+import { REMOTE_CONTROL_OFF_SETTINGS } from '../shell/remote-control'
 
 interface McpConfigOptions {
   agentId: string
@@ -43,6 +44,24 @@ export function writeAgentMcpConfig(opts: McpConfigOptions): string {
   }
 
   writeFileSync(filePath, JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 })
+  return filePath
+}
+
+/**
+ * One shared Claude settings file that keeps a session off Remote Control,
+ * passed as `--settings` to every Claude agent that should not have it. Its
+ * content never changes, so it is written once and never cleaned up.
+ */
+export function remoteControlOffSettingsPath(): string {
+  return path.join(os.tmpdir(), 'cog-claude-remote-control-off.json')
+}
+
+export function ensureRemoteControlOffSettings(): string {
+  const filePath = remoteControlOffSettingsPath()
+  const wanted = JSON.stringify(REMOTE_CONTROL_OFF_SETTINGS, null, 2)
+  let current: string | null = null
+  try { current = readFileSync(filePath, 'utf-8') } catch { /* missing */ }
+  if (current !== wanted) writeFileSync(filePath, wanted, { encoding: 'utf-8', mode: 0o600 })
   return filePath
 }
 

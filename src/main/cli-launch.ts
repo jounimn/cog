@@ -1,6 +1,7 @@
 import type { AgentConfig } from '../shared/types'
 import { isShellSafeSessionId, type SessionLaunch } from './agent-session'
 import { permissionModeArgs } from './shell/permission-mode'
+import { remoteControlArgs } from './shell/remote-control'
 
 // ── Input validation for values that get spliced into shell command strings ──
 //
@@ -101,7 +102,11 @@ export function buildCliLaunchCommands(
   hubPort: number,
   hubSecret: string,
   ensurePiAdapter = false,
-  session?: SessionLaunch
+  session?: SessionLaunch,
+  // Path of the settings file that turns Remote Control off (see
+  // shell/remote-control.ts). When given, Claude agents get Remote Control
+  // on or off per agent; when absent the user's own settings decide.
+  remoteControlOffSettingsPath?: string
 ): string[] | null {
   const cliBase = config.cli
 
@@ -140,6 +145,9 @@ export function buildCliLaunchCommands(
     const parts = [`claude --mcp-config "${mcpConfigArg}"`]
     if (safeModel) parts[0] += ` --model ${safeModel}`
     parts[0] += permissionModeArgs(config)
+    if (remoteControlOffSettingsPath) {
+      parts[0] += remoteControlArgs(config, isWsl ? toWslPath(remoteControlOffSettingsPath) : remoteControlOffSettingsPath)
+    }
     if (sessionId) parts[0] += resume ? ` --resume ${sessionId}` : ` --session-id ${sessionId}`
     return parts
   }
