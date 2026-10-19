@@ -3,6 +3,7 @@ import type { IPty } from 'node-pty'
 import { StatusDetector } from './status-detector'
 import { OutputBuffer } from './output-buffer'
 import type { AgentConfig, AgentStatus } from '../../shared/types'
+import { DEFAULT_TERMINAL_SIZE } from './terminal-size'
 
 export interface ManagedPty {
   pty: IPty
@@ -22,6 +23,9 @@ interface SpawnOptions {
   mcpConfigPath: string | null
   projectRoot: string
   extraEnv?: Record<string, string>
+  /** Size of the renderer pane this PTY will draw into; 120x30 when unknown. */
+  cols?: number
+  rows?: number
   onData: (data: string) => void
   onExit: (exitCode: number | undefined) => void
   onStatusChange: (status: AgentStatus) => void
@@ -82,8 +86,8 @@ export function spawnAgentPty(opts: SpawnOptions): ManagedPty {
 
   const ptyProcess = pty.spawn(shell, shellArgs, {
     name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
+    cols: opts.cols ?? DEFAULT_TERMINAL_SIZE.cols,
+    rows: opts.rows ?? DEFAULT_TERMINAL_SIZE.rows,
     cwd: opts.config.cwd,
     env: { ...process.env, ...opts.extraEnv } as Record<string, string>,
     // Windows: use the conpty.dll that node-pty bundles instead of the OS's
