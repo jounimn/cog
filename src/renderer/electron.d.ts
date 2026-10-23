@@ -5,6 +5,9 @@ declare global {
     electronAPI: {
       spawnAgent: (config: AgentConfig) => Promise<{ id: string; mcpConfigPath: string }>
       killAgent: (agentId: string) => Promise<void>
+      listKilledAgents: () => Promise<import('../shared/types').KilledAgentSummary[]>
+      restoreAgent: (agentId: string) => Promise<{ ok: true } | { ok: false; error: string }>
+      forgetKilledAgent: (agentId: string) => Promise<void>
       sleepAgent: (agentId: string) => Promise<{ ok: true } | { ok: false; error: string }>
       wakeAgent: (agentId: string) => Promise<{ ok: true } | { ok: false; error: string }>
       sleepSettingsGet: () => Promise<import('../shared/types').SleepSettings>

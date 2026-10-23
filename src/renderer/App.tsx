@@ -12,6 +12,7 @@ import { loadWindowBounds, saveWindowBounds, deleteWindowBounds } from './window
 import { viewportStore } from './viewport-store'
 import { terminalRegistry } from './components/TerminalWindow'
 import { useAgents } from './hooks/useAgents'
+import { killConfirmText } from './killed-agents'
 import { UpdateNotice } from './components/UpdateNotice'
 import { WhatsNewDialog } from './components/WhatsNewDialog'
 import { EditAgentDialog } from './components/EditAgentDialog'
@@ -88,7 +89,7 @@ export function App(): React.ReactElement {
     setZoom, setPan, applyViewport, setViewportSize,
     updateWindowPosition, updateWindowSize, zoomToFit
   } = useWindowManager()
-  const { agents, spawnAgent, killAgent, getStatusColor } = useAgents()
+  const { agents, spawnAgent, killAgent, getStatusColor, killedAgents, refreshKilled, restoreAgent, forgetKilledAgent } = useAgents()
 
   // Restore persisted workspaces (folder-bound tabs) on launch.
   useEffect(() => {
@@ -299,6 +300,7 @@ export function App(): React.ReactElement {
       removeWindow(windowId)
       return
     }
+    if (!window.confirm(killConfirmText(agent?.name ?? windowId))) return
     await killAgent(windowId)
     // Deliberately closed → forget its saved layout so it doesn't linger.
     deleteWindowBounds(windowId)
@@ -482,9 +484,18 @@ export function App(): React.ReactElement {
   }, [handleRemoveLink])
 
   const handleKillFromMenu = useCallback(async (agentId: string) => {
+    const name = agents.find(a => a.id === agentId)?.name ?? agentId
+    if (!window.confirm(killConfirmText(name))) return
     await killAgent(agentId)
     removeWindow(agentId)
-  }, [killAgent, removeWindow])
+  }, [agents, killAgent, removeWindow])
+
+  // Undo a kill: the main process respawns it (resuming its session) and the
+  // window comes back through the usual agent-state update.
+  const handleRestoreAgent = useCallback(async (agentId: string) => {
+    const result = await restoreAgent(agentId)
+    if (!result.ok) window.alert(`Could not restore the agent: ${result.error}`)
+  }, [restoreAgent])
 
   const handleTopBarLinkDragStart = useCallback((agentName: string, e: React.MouseEvent) => {
     setLinkDraggingFrom(agentName)
@@ -720,6 +731,10 @@ export function App(): React.ReactElement {
             onClearContext={handleClearContext}
             onDisconnectAgent={handleDisconnectAgent}
             onKillAgent={handleKillFromMenu}
+            killedAgents={killedAgents}
+            onAgentMenuOpen={refreshKilled}
+            onRestoreAgent={handleRestoreAgent}
+            onForgetKilled={forgetKilledAgent}
             pinboardOpen={pinboardOpen}
             onTogglePinboard={togglePinboard}
             infoOpen={infoOpen}
