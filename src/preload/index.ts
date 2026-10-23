@@ -4,6 +4,9 @@ import { IPC } from '../shared/types'
 contextBridge.exposeInMainWorld('electronAPI', {
   spawnAgent: (config: unknown) => ipcRenderer.invoke(IPC.SPAWN_AGENT, config),
   killAgent: (agentId: string) => ipcRenderer.invoke(IPC.KILL_AGENT, agentId),
+  listKilledAgents: () => ipcRenderer.invoke(IPC.AGENT_LIST_KILLED),
+  restoreAgent: (agentId: string) => ipcRenderer.invoke(IPC.AGENT_RESTORE, agentId),
+  forgetKilledAgent: (agentId: string) => ipcRenderer.invoke(IPC.AGENT_FORGET_KILLED, agentId),
   sleepAgent: (agentId: string) => ipcRenderer.invoke(IPC.AGENT_SLEEP, agentId),
   wakeAgent: (agentId: string) => ipcRenderer.invoke(IPC.AGENT_WAKE, agentId),
   sleepSettingsGet: () => ipcRenderer.invoke(IPC.SLEEP_SETTINGS_GET),

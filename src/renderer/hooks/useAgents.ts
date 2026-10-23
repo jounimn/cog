@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { AgentConfig, AgentState } from '../../shared/types'
+import type { AgentConfig, AgentState, KilledAgentSummary } from '../../shared/types'
 import { v4 as uuid } from 'uuid'
 
 const STATUS_COLORS: Record<string, string> = {
@@ -13,6 +13,9 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function useAgents() {
   const [agents, setAgents] = useState<AgentState[]>([])
+  // Killed agents of the active workspace; refreshed when the Agents menu
+  // opens and after every kill / restore / forget.
+  const [killedAgents, setKilledAgents] = useState<KilledAgentSummary[]>([])
 
   useEffect(() => {
     const cleanup = window.electronAPI.onAgentStateUpdate((updated) => {
@@ -28,13 +31,29 @@ export function useAgents() {
     return fullConfig.id
   }, [])
 
+  const refreshKilled = useCallback(async () => {
+    setKilledAgents(await window.electronAPI.listKilledAgents())
+  }, [])
+
   const killAgent = useCallback(async (agentId: string) => {
     await window.electronAPI.killAgent(agentId)
-  }, [])
+    await refreshKilled()
+  }, [refreshKilled])
+
+  const restoreAgent = useCallback(async (agentId: string) => {
+    const result = await window.electronAPI.restoreAgent(agentId)
+    await refreshKilled()
+    return result
+  }, [refreshKilled])
+
+  const forgetKilledAgent = useCallback(async (agentId: string) => {
+    await window.electronAPI.forgetKilledAgent(agentId)
+    await refreshKilled()
+  }, [refreshKilled])
 
   const getStatusColor = useCallback((status: string) => {
     return STATUS_COLORS[status] ?? '#888'
   }, [])
 
-  return { agents, spawnAgent, killAgent, getStatusColor }
+  return { agents, spawnAgent, killAgent, getStatusColor, killedAgents, refreshKilled, restoreAgent, forgetKilledAgent }
 }

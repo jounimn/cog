@@ -160,6 +160,9 @@ export interface BoardPage {
 export const IPC = {
   SPAWN_AGENT: 'agent:spawn',
   KILL_AGENT: 'agent:kill',
+  AGENT_LIST_KILLED: 'agent:list-killed',
+  AGENT_RESTORE: 'agent:restore',
+  AGENT_FORGET_KILLED: 'agent:forget-killed',
   AGENT_RESPAWN: 'agent:respawn',
   GET_AGENTS: 'agent:list',
   AGENT_STATE_UPDATE: 'agent:state-update',
@@ -643,6 +646,17 @@ export interface FireHistoryEntry {
 }
 
 export type ScheduleStatus = 'active' | 'paused' | 'stopped' | 'expired'
+
+/** A killed agent as the renderer lists it (full config stays in the main process). */
+export interface KilledAgentSummary {
+  id: string
+  name: string
+  role: string
+  cli: string
+  killedAt: string
+  /** Whether a restore will resume the CLI session it had. */
+  resumable: boolean
+}
 
 export type RespawnResult =
   | { ok: true }
