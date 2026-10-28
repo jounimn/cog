@@ -9,6 +9,7 @@ import { InfoStore } from './db/info-store'
 import { InboxStore } from './db/inbox-store'
 import { ProposalsStore } from './db/proposals-store'
 import { AgentRosterStore } from './db/agent-roster-store'
+import { AgentGraveyardStore } from './db/agent-graveyard-store'
 import { SleepSettingsStore } from './db/sleep-settings-store'
 import { meetsThreshold } from './hub/inbox-channel'
 import { createHubServer, type HubServer } from './hub/server'
@@ -52,7 +53,7 @@ import * as themesStore from './themes/themes-store'
 import * as workspaceThemeStore from './themes/workspace-theme-store'
 import { getWorkspaceThemeById, WORKSPACE_THEMES } from '../shared/workspace-themes'
 import { migrateLegacyUserData } from './migration/userdata-migration'
-import type { AgentConfig, AgentState, AgentTheme, SleepSettings, RemoteSetupProgress, CommunityAgent, CommunityCategory, RespawnResult, NotificationThreshold, ProposedAgent, TeamProposal, TelegramStatus } from '../shared/types'
+import type { AgentConfig, AgentState, AgentTheme, SleepSettings, RemoteSetupProgress, CommunityAgent, CommunityCategory, RespawnResult, NotificationThreshold, ProposedAgent, TeamProposal, TelegramStatus, KilledAgentSummary } from '../shared/types'
 import { IPC, DEFAULT_SLEEP_SETTINGS } from '../shared/types'
 import { validateRespawnRequest } from './respawn-validation'
 import { sessionStrategyFor, sessionExists, sessionDirHasSessions, discoverSessionId, type SessionLaunch } from './agent-session'
@@ -112,6 +113,7 @@ interface WorkspaceCtx {
     board: BoardStore
     boardAppearance: BoardAppearanceStore
     roster: AgentRosterStore
+    graveyard: AgentGraveyardStore
     sleep: SleepSettingsStore
   }
   promptScheduler: PromptScheduler
@@ -2017,6 +2019,9 @@ function teardownAgent(managed: ManagedPty): void {
   // User-initiated removal: drop it from its workspace roster so it does NOT
   // respawn on next boot. (App-quit / context-close kill PTYs via
   // closeCtxResources, which never calls this — so those DO respawn.)
+  // The config is parked in the graveyard first, so the kill can be undone
+  // from the Agents menu: a restore respawns it and resumes its session.
+  ctx?.stores.graveyard.save(managed.config)
   ctx?.stores.roster.remove(id)
   h.registry.remove(name)
   h.messages.clearAgent(name)
@@ -2130,6 +2135,7 @@ function teardownSleepingAgent(cfg: AgentConfig): void {
   const { id, name } = cfg
   const ctx = contextRegistry.resolveForSpawn(cfg.tabId)
   const h = ctx?.hub ?? hub
+  ctx?.stores.graveyard.save(cfg)
   ctx?.stores.roster.remove(id)
   h.registry.remove(name)
   h.messages.clearAgent(name)
@@ -2566,6 +2572,7 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
   const boardStore = new BoardStore(db)
   const boardAppearanceStore = new BoardAppearanceStore(db)
   const rosterStore = new AgentRosterStore(db)
+  const graveyardStore = new AgentGraveyardStore(db)
   const sleepStore = new SleepSettingsStore(db)
 
   const hub = await createHubServer(0, () => scheduleBridge ?? undefined, () => boardBridge ?? undefined, () => agentBridge ?? undefined)
@@ -2945,6 +2952,7 @@ async function createWorkspaceContext(workspaceId: string, projectPath: string):
       board: boardStore,
       boardAppearance: boardAppearanceStore,
       roster: rosterStore,
+      graveyard: graveyardStore,
       sleep: sleepStore
     },
     promptScheduler,
@@ -3302,6 +3310,57 @@ function setupIPC(): void {
     if (managed) { teardownAgent(managed); return }
     const sleeper = findSleepingConfig(agentId)
     if (sleeper) teardownSleepingAgent(sleeper)
+  })
+
+  // Killed agents of the active workspace, newest first.
+  ipcMain.handle(IPC.AGENT_LIST_KILLED, (): KilledAgentSummary[] => {
+    const ctx = contextRegistry.getActive()
+    if (!ctx) return []
+    return ctx.stores.graveyard.list().map((k) => ({
+      id: k.config.id,
+      name: k.config.name,
+      role: k.config.role,
+      cli: k.config.cli,
+      killedAt: k.killedAt,
+      resumable: !!(k.config.sessionStarted && k.config.sessionId)
+    }))
+  })
+
+  // Undo a kill: the parked config goes through the same spawn as a boot
+  // respawn, so the CLI resumes the session it had. Comes back awake, in the
+  // workspace it was restored from.
+  ipcMain.handle(IPC.AGENT_RESTORE, (_event, agentId: string): { ok: true } | { ok: false; error: string } => {
+    const ctx = contextRegistry.getActive()
+    if (!ctx) return { ok: false, error: 'No active workspace' }
+    const cfg = ctx.stores.graveyard.take(agentId)
+    if (!cfg) return { ok: false, error: 'Agent is not in the killed list' }
+    if (agents.has(cfg.id) || ctx.hub.registry.get(cfg.name)) {
+      ctx.stores.graveyard.save(cfg)
+      return { ok: false, error: `An agent named "${cfg.name}" is already in this workspace` }
+    }
+    cfg.tabId = ctx.workspaceId
+    cfg.sleeping = false
+    delete cfg.sleptAt
+    manualKills.delete(cfg.id)
+    try {
+      if (cfg.sessionStarted) {
+        handleSpawnAgent(cfg, {
+          reconnect: true,
+          onWorktree: (r) => reconnectWorktreeNote(r).replace('<slug>', agentSlug(cfg.name))
+        })
+      } else {
+        handleSpawnAgent(cfg)
+      }
+      console.log(`Agent "${cfg.name}" restored from the killed list`)
+      return { ok: true }
+    } catch (err: any) {
+      ctx.stores.graveyard.save(cfg)
+      return { ok: false, error: err?.message ?? String(err) }
+    }
+  })
+
+  ipcMain.handle(IPC.AGENT_FORGET_KILLED, (_event, agentId: string) => {
+    contextRegistry.getActive()?.stores.graveyard.forget(agentId)
   })
 
   ipcMain.handle(IPC.AGENT_SLEEP, (_event, agentId: string) => sleepAgent(agentId, 'user'))

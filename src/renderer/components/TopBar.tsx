@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { AgentPill } from './AgentPill'
 import { TabBar } from './TabBar'
-import type { AgentState } from '../../shared/types'
+import type { AgentState, KilledAgentSummary } from '../../shared/types'
+import { formatKilledAt } from '../killed-agents'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#888',
@@ -19,6 +20,11 @@ interface TopBarProps {
   onClearContext: (agentId: string) => void
   onDisconnectAgent: (agentName: string) => void
   onKillAgent: (agentId: string) => void
+  /** Agents killed in this workspace (newest first) and what to do with them. */
+  killedAgents: KilledAgentSummary[]
+  onAgentMenuOpen: () => void
+  onRestoreAgent: (agentId: string) => void
+  onForgetKilled: (agentId: string) => void
   pinboardOpen: boolean
   onTogglePinboard: () => void
   infoOpen: boolean
@@ -115,6 +121,7 @@ function DropdownMenu({ items, onClose, style }: {
 export function TopBar({
   projectName, onSwitchProject, agents, onSpawnClick, onAgentClick,
   onClearContext, onDisconnectAgent, onKillAgent,
+  killedAgents, onAgentMenuOpen, onRestoreAgent, onForgetKilled,
   pinboardOpen, onTogglePinboard, infoOpen, onToggleInfo,
   filesOpen, onToggleFiles,
   racOpen, onToggleRac, usageOpen, onToggleUsage,
@@ -151,6 +158,10 @@ export function TopBar({
   }
   const hoverIn = (e: React.MouseEvent) => (e.currentTarget.style.backgroundColor = '#333')
   const hoverOut = (e: React.MouseEvent) => (e.currentTarget.style.backgroundColor = 'transparent')
+  const killedBtnStyle: React.CSSProperties = {
+    background: 'none', border: '1px solid', borderRadius: '4px', padding: '2px 6px',
+    fontSize: '10px', cursor: 'pointer', flexShrink: 0
+  }
 
   const activePanelCount = [pinboardOpen, infoOpen, filesOpen, racOpen, usageOpen, gitOpen, schedulesOpen, trollboxOpen, inboxOpen, boardOpen].filter(Boolean).length
 
@@ -197,7 +208,7 @@ export function TopBar({
 
       {/* Agents dropdown */}
       <div style={{ position: 'relative' }}>
-        <button onClick={() => { setAgentMenuOpen(!agentMenuOpen); setExpandedAgent(null) }} style={{
+        <button onClick={() => { const next = !agentMenuOpen; setAgentMenuOpen(next); setExpandedAgent(null); if (next) onAgentMenuOpen() }} style={{
           ...btnStyle,
           border: agents.length > 0 ? '1px solid #4caf50' : '1px solid #444',
           color: agents.length > 0 ? '#4caf50' : '#999',
@@ -261,6 +272,29 @@ export function TopBar({
                 </div>
               )
             })}
+            {killedAgents.length > 0 && (
+              <div data-killed-list style={{ borderTop: '1px solid #333', marginTop: '4px', paddingTop: '4px' }}>
+                <div style={{ padding: '4px 14px', color: '#777', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  Killed ({killedAgents.length})
+                </div>
+                {killedAgents.map(k => (
+                  <div key={k.id} data-killed-agent={k.name} style={{
+                    display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 14px', fontSize: '12px', color: '#999'
+                  }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#555', flexShrink: 0 }} />
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={`${k.role} \u00b7 ${k.cli} \u00b7 killed ${new Date(k.killedAt).toLocaleString()}${k.resumable ? ' \u00b7 session resumes on restore' : ''}`}>
+                      {k.name}
+                    </span>
+                    <span style={{ color: '#666', fontSize: '10px', flexShrink: 0 }}>{formatKilledAt(k.killedAt)}</span>
+                    <button onClick={() => { onRestoreAgent(k.id); closeAgentMenu() }} title="Spawn it again; a Claude session resumes"
+                      style={{ ...killedBtnStyle, color: '#4caf50', borderColor: '#2e5c31' }}>Restore</button>
+                    <button onClick={() => onForgetKilled(k.id)} title="Remove from this list"
+                      style={{ ...killedBtnStyle, color: '#888', borderColor: '#444' }}>Forget</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

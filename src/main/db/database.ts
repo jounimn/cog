@@ -93,6 +93,11 @@ export function createDatabase(dbPath: string): Database.Database {
       config     TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS agent_graveyard (
+      id         TEXT PRIMARY KEY,
+      config     TEXT NOT NULL,
+      killed_at  TEXT NOT NULL
+    );
   `)
 
   // Migrations for existing DBs — safe to fail if column already exists
