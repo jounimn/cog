@@ -1,14 +1,16 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { AgentTheme } from '../../shared/types'
-import { resolveTheme } from '../themes'
+import { appearanceStore, useAppearance } from '../appearance-store'
+import { resolveAppearance } from '../terminal-appearance'
 import { createTerminalRegistry } from '../terminal-registry'
 import { debounce } from '../debounce'
 
 interface TerminalWindowProps {
   agentId: string
+  agentName: string
   theme?: AgentTheme
 }
 
@@ -18,16 +20,6 @@ interface TerminalHandle {
   /** The DOM node xterm rendered into. Re-parented on every mount. */
   element: HTMLDivElement
   dispose(): void
-}
-
-function xtermTheme(theme?: AgentTheme) {
-  const resolved = resolveTheme(theme)
-  return {
-    background: resolved.bg,
-    foreground: resolved.text,
-    cursor: resolved.text,
-    selectionBackground: '#444'
-  }
 }
 
 /**
@@ -40,10 +32,13 @@ function createTerminal(agentId: string): TerminalHandle {
   element.style.width = '100%'
   element.style.height = '100%'
 
+  // Global appearance only; the component's effect applies the agent-specific
+  // resolution (name + theme) as soon as it mounts.
+  const initial = resolveAppearance(appearanceStore.get(), '')
   const term = new Terminal({
-    theme: xtermTheme(),
-    fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
-    fontSize: 13,
+    theme: initial.xterm,
+    fontFamily: initial.fontFamily,
+    fontSize: initial.fontSize,
     cursorBlink: true,
     scrollback: 5000
   })
@@ -109,8 +104,13 @@ export function focusTerminal(agentId: string): void {
   if (terminalRegistry.has(agentId)) terminalRegistry.acquire(agentId).term.focus()
 }
 
-export function TerminalWindow({ agentId, theme }: TerminalWindowProps): React.ReactElement {
+export function TerminalWindow({ agentId, agentName, theme }: TerminalWindowProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
+  const appearance = useAppearance()
+  const resolved = useMemo(
+    () => resolveAppearance(appearance, agentName, theme),
+    [appearance, agentName, theme]
+  )
 
   useEffect(() => {
     const container = containerRef.current
@@ -149,18 +149,24 @@ export function TerminalWindow({ agentId, theme }: TerminalWindowProps): React.R
     }
   }, [agentId])
 
-  // Live-update xterm theme when the prop changes — don't re-create the terminal
+  // Live-apply font, size and colours (appearance, agent name or theme change)
+  // without re-creating the terminal; refit and tell the PTY the new size.
   useEffect(() => {
     if (!terminalRegistry.has(agentId)) return
-    terminalRegistry.acquire(agentId).term.options.theme = xtermTheme(theme)
-  }, [agentId, theme])
+    const { term, fit } = terminalRegistry.acquire(agentId)
+    term.options.fontFamily = resolved.fontFamily
+    term.options.fontSize = resolved.fontSize
+    term.options.theme = resolved.xterm
+    if (!containerRef.current?.contains(term.element ?? null)) return
+    fit.fit()
+    window.electronAPI.resizePty(agentId, term.cols, term.rows)
+  }, [agentId, resolved.fontFamily, resolved.fontSize, resolved.xterm])
 
-  const resolved = resolveTheme(theme)
   return (
     <div
       ref={containerRef}
       onWheel={(e) => e.stopPropagation()}
-      style={{ width: '100%', height: '100%', backgroundColor: resolved.bg }}
+      style={{ width: '100%', height: '100%', backgroundColor: resolved.xterm.background }}
     />
   )
 }

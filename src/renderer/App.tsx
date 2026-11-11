@@ -21,6 +21,7 @@ import { UpdateNotice } from './components/UpdateNotice'
 import { WhatsNewDialog } from './components/WhatsNewDialog'
 import { EditAgentDialog } from './components/EditAgentDialog'
 import type { AgentConfig, AgentGroup, RecentProject, WindowPosition, CanvasState, WorkspaceTab, TeamProposal, InboxMessage } from '../shared/types'
+import { appearanceStore, motionStore } from './appearance-store'
 import { TeamProposalDialog } from './components/TeamProposalDialog'
 
 declare const electronAPI: {
@@ -424,6 +425,11 @@ export function App(): React.ReactElement {
     window.electronAPI.getLinks().then(setLinks)
     window.electronAPI.getGroups().then(setGroups)
   }, [project, activeTabId])
+
+  useEffect(() => {
+    void appearanceStore.load()
+    void motionStore.load()
+  }, [])
 
   // Listen for team proposals: surface modal as soon as the orchestrator submits.
   // On startup, also pull any pending proposals that landed before the renderer

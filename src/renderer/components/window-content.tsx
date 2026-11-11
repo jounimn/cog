@@ -74,5 +74,5 @@ export function renderWindowContent(win: WindowState, ctx: WindowContentContext)
   } else if (agent && agent.name.startsWith('rac-')) {
     return <RacAgentChat agentName={agent.name} />
   }
-  return <TerminalWindow agentId={win.id} theme={agent?.theme} />
+  return <TerminalWindow agentId={win.id} agentName={agent?.name ?? ''} theme={agent?.theme} />
 }
