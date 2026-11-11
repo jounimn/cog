@@ -1,0 +1,40 @@
+:root {
+  /* Ground and surfaces */
+  --canvas: 13 18 26;
+  --surface: 20 27 38;
+  --surface-muted: 31 41 56;
+  --surface-sunk: 10 14 21;
+
+  /* Lines */
+  --line: 40 53 71;
+  --line-strong: 70 90 116;
+  --grid: 128 160 196;
+  --steel: 112 152 194;
+
+  /* Ink */
+  --ink: 228 234 242;
+  --ink-muted: 172 186 204;
+  --ink-subtle: 136 152 174;
+
+  /* Hint */
+  --hint: 255 106 26;
+  --hint-hover: 255 134 70;
+  --on-hint: 13 18 26;
+
+  /* Focus */
+  --focus: 156 200 244;
+
+  /* Status */
+  --working: 124 198 238;
+  --warning: 236 198 86;
+  --danger: 244 106 98;
+  --success: 120 206 152;
+
+  /* Shape, motion, type */
+  --r: 3px;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur: 180ms;
+  --font-text: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-instrument: "Doto", "IBM Plex Mono", monospace;
+}
