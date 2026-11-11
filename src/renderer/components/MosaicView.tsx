@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { MosaicPane } from './MosaicPane'
 import { renderWindowContent, windowAgent, windowStatusColor, windowTitle } from './window-content'
 import { setRatio, type MosaicNode, type MosaicPath } from '../mosaic-tree'
@@ -43,9 +43,12 @@ export function MosaicView({
   windows, agents, tabs, activeTabId, links, tree, maximizedId, focusedId,
   onTreeChange, onMaximize, onFocus, onClose, onSpawnClick
 }: MosaicViewProps): React.ReactElement {
+  // A divider drag edits this in-memory copy live and persists once, on release.
+  const [dragTree, setDragTree] = useState<MosaicNode | null>(null)
+  const shownTree = dragTree ?? tree
   // Latest tree for divider drags, which fire faster than re-renders.
-  const treeRef = useRef(tree)
-  treeRef.current = tree
+  const treeRef = useRef(shownTree)
+  treeRef.current = shownTree
 
   const maximizedWin = maximizedId ? windows.find(w => w.id === maximizedId) : undefined
 
@@ -54,7 +57,12 @@ export function MosaicView({
   useEffect(() => {
     if (!isMaximized) return
     const handler = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onMaximize(null)
+      if (e.key !== 'Escape') return
+      // Escape typed into a terminal or an editable field belongs to it (e.g. interrupting a CLI).
+      const t = e.target
+      if (t instanceof Element && t.closest('.xterm, input, textarea, [contenteditable=""], [contenteditable="true"]')) return
+      if ((t as HTMLElement | null)?.isContentEditable) return
+      onMaximize(null)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -87,6 +95,7 @@ export function MosaicView({
     if (!container) return
     e.preventDefault()
     divider.setPointerCapture(e.pointerId)
+    let dragged: MosaicNode | null = null
     const move = (ev: PointerEvent): void => {
       const current = treeRef.current
       if (!current) return
@@ -98,7 +107,8 @@ export function MosaicView({
       const next = setRatio(current, path, ratio)
       if (next !== current) {
         treeRef.current = next
-        onTreeChange(next)
+        dragged = next
+        setDragTree(next)
       }
     }
     const end = (ev: PointerEvent): void => {
@@ -106,6 +116,8 @@ export function MosaicView({
       divider.removeEventListener('pointermove', move)
       divider.removeEventListener('pointerup', end)
       divider.removeEventListener('pointercancel', end)
+      if (dragged) onTreeChange(dragged)
+      setDragTree(null)
     }
     divider.addEventListener('pointermove', move)
     divider.addEventListener('pointerup', end)
@@ -143,7 +155,7 @@ export function MosaicView({
     <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', backgroundColor: '#111', padding: DIVIDER, boxSizing: 'border-box' }}>
       {maximizedWin ? (
         renderPane(maximizedWin)
-      ) : tree === null || windows.length === 0 ? (
+      ) : windows.length === 0 ? (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', color: '#666', fontSize: '13px' }}>
           <span>No windows in this workspace yet.</span>
           <button onClick={onSpawnClick} style={{
@@ -151,9 +163,9 @@ export function MosaicView({
             backgroundColor: '#2a2a2a', color: '#4caf50', fontSize: '12px', cursor: 'pointer'
           }}>Spawn agent</button>
         </div>
-      ) : (
-        renderNode(tree, [])
-      )}
+      ) : shownTree ? (
+        renderNode(shownTree, [])
+      ) : null}
     </div>
   )
 }

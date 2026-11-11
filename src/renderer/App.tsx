@@ -109,7 +109,7 @@ export function App(): React.ReactElement {
   const tabWindows = windows.filter(w => w.tabId === activeTabId)
 
   // Per-tab Mosaic view (tiled alternative to the canvas).
-  const { mosaic, updateMosaic, focusedPaneId, setFocusedPaneId } =
+  const { mosaic, tree: mosaicTree, maximizedId: mosaicMaximizedId, updateMosaic, focusedPaneId, setFocusedPaneId } =
     useMosaicState(activeTabId, tabWindows.map(w => w.id))
   const toggleViewMode = useCallback(() => {
     updateMosaic({ mode: mosaic.mode === 'mosaic' ? 'canvas' : 'mosaic' })
@@ -131,6 +131,7 @@ export function App(): React.ReactElement {
       setAutoFitTab(null)
     } else {
       setAutoFitTab(activeTabId)
+      setFitRequest(0) // a request left over from another tab must not fire here
     }
     return () => {
       // Leaving this tab: remember where it was left.
@@ -551,7 +552,7 @@ export function App(): React.ReactElement {
       if (e.ctrlKey && e.key === 'Tab') {
         if (inMosaic) {
           // Cycle panes in tree order, starting after the focused one.
-          const ids = leafIds(mosaic.tree)
+          const ids = leafIds(mosaicTree)
           if (ids.length > 0) {
             const next = ids[(ids.indexOf(focusedPaneId ?? '') + 1) % ids.length]
             setFocusedPaneId(next)
@@ -579,7 +580,7 @@ export function App(): React.ReactElement {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId, mosaic, focusedPaneId, setFocusedPaneId, toggleViewMode])
+  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId, mosaic, mosaicTree, focusedPaneId, setFocusedPaneId, toggleViewMode])
 
   useEffect(() => {
     electronAPI.getProject().then((p: RecentProject | null) => {
@@ -809,8 +810,8 @@ export function App(): React.ReactElement {
             tabs={tabs}
             activeTabId={activeTabId}
             links={links}
-            tree={mosaic.tree}
-            maximizedId={mosaic.maximizedId}
+            tree={mosaicTree}
+            maximizedId={mosaicMaximizedId}
             focusedId={focusedPaneId}
             onTreeChange={tree => updateMosaic({ tree })}
             onMaximize={id => updateMosaic({ maximizedId: id })}

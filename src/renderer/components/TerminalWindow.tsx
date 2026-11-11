@@ -59,6 +59,8 @@ function createTerminal(agentId: string): TerminalHandle {
   // Ctrl+C: copy if text selected, otherwise send SIGINT to PTY
   // Ctrl+V: paste from clipboard into PTY
   term.attachCustomKeyEventHandler((ev) => {
+    // Ctrl+Shift+M toggles Canvas/Mosaic (window listener); don't send it to the PTY as Ctrl+M (CR).
+    if (ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === 'm') return false
     if (ev.ctrlKey && ev.key === 'c' && ev.type === 'keydown') {
       if (term.hasSelection()) {
         navigator.clipboard.writeText(term.getSelection())
