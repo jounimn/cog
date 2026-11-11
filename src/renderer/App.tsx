@@ -1,6 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react'
 import { TopBar } from './components/TopBar'
 import { Workspace } from './components/Workspace'
+import { MosaicView } from './components/MosaicView'
+import { useMosaicState } from './hooks/useMosaicState'
+import { mosaicStore } from './mosaic-store'
+import { leafIds } from './mosaic-tree'
 import { SpawnDialog } from './components/SpawnDialog'
 import { PresetDialog } from './components/PresetDialog'
 import { BugReportDialog } from './components/BugReportDialog'
@@ -103,6 +107,13 @@ export function App(): React.ReactElement {
 
   // Filter windows to only those belonging to the active tab
   const tabWindows = windows.filter(w => w.tabId === activeTabId)
+
+  // Per-tab Mosaic view (tiled alternative to the canvas).
+  const { mosaic, updateMosaic, focusedPaneId, setFocusedPaneId } =
+    useMosaicState(activeTabId, tabWindows.map(w => w.id))
+  const toggleViewMode = useCallback(() => {
+    updateMosaic({ mode: mosaic.mode === 'mosaic' ? 'canvas' : 'mosaic' })
+  }, [updateMosaic, mosaic.mode])
 
   // ── Per-tab viewport ───────────────────────────────────────────────────────
   // Each tab lays its windows out in its own region of the canvas, so the view
@@ -262,6 +273,7 @@ export function App(): React.ReactElement {
     if (tabs.length <= 1) return
     await window.electronAPI.closeTab(tabId)
     viewportStore.remove(tabId)
+    mosaicStore.remove(tabId)
     setTabs(prev => prev.filter(t => t.id !== tabId))
     if (activeTabId === tabId) {
       const remaining = tabs.filter(t => t.id !== tabId)
@@ -519,37 +531,55 @@ export function App(): React.ReactElement {
   // Keyboard shortcuts: Ctrl+1..9 to focus windows, Ctrl+Tab to cycle
   useEffect(() => {
     let currentFocusIdx = 0
+    const inMosaic = mosaic.mode === 'mosaic'
     const handler = (e: KeyboardEvent) => {
+      // Ctrl+Shift+M = toggle Canvas / Mosaic
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'm') {
+        toggleViewMode()
+        e.preventDefault()
+        return
+      }
       if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
         const idx = parseInt(e.key) - 1
         if (tabWindows[idx]) {
+          if (inMosaic) setFocusedPaneId(tabWindows[idx].id)
           focusWindow(tabWindows[idx].id)
           currentFocusIdx = idx
         }
         e.preventDefault()
       }
       if (e.ctrlKey && e.key === 'Tab') {
-        if (tabWindows.length > 0) {
+        if (inMosaic) {
+          // Cycle panes in tree order, starting after the focused one.
+          const ids = leafIds(mosaic.tree)
+          if (ids.length > 0) {
+            const next = ids[(ids.indexOf(focusedPaneId ?? '') + 1) % ids.length]
+            setFocusedPaneId(next)
+            focusWindow(next)
+          }
+        } else if (tabWindows.length > 0) {
           currentFocusIdx = (currentFocusIdx + 1) % tabWindows.length
           focusWindow(tabWindows[currentFocusIdx].id)
         }
         e.preventDefault()
       }
-      // Ctrl+0 = reset zoom
-      if (e.ctrlKey && e.key === '0' && !e.shiftKey) {
-        userSetZoom(1.0)
-        userSetPan(0, 0)
-        e.preventDefault()
-      }
-      // Ctrl+Shift+0 = fit all
-      if (e.ctrlKey && e.key === ')') {
-        zoomToFit(window.innerWidth, window.innerHeight - 44, activeTabId)
-        e.preventDefault()
+      if (!inMosaic) {
+        // Ctrl+0 = reset zoom
+        if (e.ctrlKey && e.key === '0' && !e.shiftKey) {
+          userSetZoom(1.0)
+          userSetPan(0, 0)
+          e.preventDefault()
+        }
+        // Ctrl+Shift+0 = fit all
+        if (e.ctrlKey && e.key === ')') {
+          zoomToFit(window.innerWidth, window.innerHeight - 44, activeTabId)
+          e.preventDefault()
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId])
+  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId, mosaic, focusedPaneId, setFocusedPaneId, toggleViewMode])
 
   useEffect(() => {
     electronAPI.getProject().then((p: RecentProject | null) => {
@@ -769,7 +799,26 @@ export function App(): React.ReactElement {
             onRenameTab={handleRenameTab}
             boardOpen={boardOpen}
             onToggleBoard={toggleBoard}
+            viewMode={mosaic.mode}
+            onToggleViewMode={toggleViewMode}
           />
+          {mosaic.mode === 'mosaic' ? (
+          <MosaicView
+            windows={tabWindows}
+            agents={tabAgents}
+            tabs={tabs}
+            activeTabId={activeTabId}
+            links={links}
+            tree={mosaic.tree}
+            maximizedId={mosaic.maximizedId}
+            focusedId={focusedPaneId}
+            onTreeChange={tree => updateMosaic({ tree })}
+            onMaximize={id => updateMosaic({ maximizedId: id })}
+            onFocus={id => { setFocusedPaneId(id); focusWindow(id) }}
+            onClose={handleClose}
+            onSpawnClick={() => setShowSpawnDialog(true)}
+          />
+          ) : (
           <Workspace
             windows={tabWindows}
             agents={tabAgents}
@@ -784,7 +833,9 @@ export function App(): React.ReactElement {
             onSetPan={userSetPan}
             onZoomToFit={(w, h) => zoomToFit(w, h, activeTabId)}
             onViewportResize={setViewportSize}
-            fitRequest={fitRequest}
+            // Only while the tab still wants auto-fit: Workspace remounts when
+            // leaving Mosaic and must not replay a stale request on mount.
+            fitRequest={autoFitTab === activeTabId ? fitRequest : 0}
             onFocusWindow={focusWindow}
             onMinimizeWindow={minimizeWindow}
             onCloseWindow={handleClose}
@@ -798,6 +849,7 @@ export function App(): React.ReactElement {
             onSleepAgent={(id) => runSleepAction('sleep', id)}
             onWakeAgent={(id) => runSleepAction('wake', id)}
           />
+          )}
           {showSpawnDialog && (
             <SpawnDialog
               onSpawn={handleSpawn}

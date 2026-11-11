@@ -3,6 +3,7 @@ import { AgentPill } from './AgentPill'
 import { TabBar } from './TabBar'
 import type { AgentState, KilledAgentSummary } from '../../shared/types'
 import { formatKilledAt } from '../killed-agents'
+import type { ViewMode } from '../mosaic-store'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#888',
@@ -59,6 +60,8 @@ interface TopBarProps {
   onRenameTab: (tabId: string, name: string) => void
   boardOpen?: boolean
   onToggleBoard?: () => void
+  viewMode: ViewMode
+  onToggleViewMode: () => void
 }
 
 function DropdownMenu({ items, onClose, style }: {
@@ -131,7 +134,8 @@ export function TopBar({
   onPresetsClick, onBugReport, onSettingsClick, onHelpMcpToolsClick,
   groups, onLinkDragStart, linkDraggingFrom,
   tabs, activeTabId, onSwitchTab, onCreateTab, onCloseTab, onRenameTab,
-  boardOpen, onToggleBoard
+  boardOpen, onToggleBoard,
+  viewMode, onToggleViewMode
 }: TopBarProps): React.ReactElement {
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
@@ -303,6 +307,27 @@ export function TopBar({
 
       {/* Right side controls */}
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }}>
+        {/* Canvas | Mosaic view toggle */}
+        <div role="group" aria-label="View mode" title="Toggle view (Ctrl+Shift+M)" style={{
+          display: 'flex', height: '28px', border: '1px solid #444', borderRadius: '5px', overflow: 'hidden'
+        }}>
+          {(['canvas', 'mosaic'] as const).map(mode => {
+            const active = viewMode === mode
+            return (
+              <button
+                key={mode}
+                aria-pressed={active}
+                onClick={() => { if (!active) onToggleViewMode() }}
+                style={{
+                  padding: '0 10px', border: 'none', fontSize: '12px', cursor: active ? 'default' : 'pointer',
+                  backgroundColor: active ? '#1e3a5f' : '#2a2a2a',
+                  color: active ? '#8cc4ff' : '#999'
+                }}
+              >{mode === 'canvas' ? 'Canvas' : 'Mosaic'}</button>
+            )
+          })}
+        </div>
+
         {/* Panels dropdown */}
         <div style={{ position: 'relative' }}>
           <button onClick={() => setPanelMenu(!panelMenu)} style={{
