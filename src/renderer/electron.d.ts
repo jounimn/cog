@@ -148,6 +148,7 @@ declare global {
       reconnectStreamDeck(): Promise<void>
       // Stream Deck → renderer panel hooks
       onStreamDeckOpenPanel(cb: (panel: string) => void): () => void
+      onHubMessageDelivered(cb: (evt: { from: string; to: string; tabId?: string }) => void): () => void
       onStreamDeckFocusAgent(cb: (name: string) => void): () => void
       onStreamDeckMarkRead(cb: (kind: string) => void): () => void
       onStreamDeckToast(cb: (msg: string) => void): () => void

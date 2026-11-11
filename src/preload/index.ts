@@ -310,6 +310,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener(IPC.VOICE_STOP, handler)
   },
   sendVoiceAudio: (audio: ArrayBuffer) => ipcRenderer.send(IPC.VOICE_AUDIO, audio),
+  onHubMessageDelivered: (cb: (evt: { from: string; to: string; tabId?: string }) => void) => {
+    const handler = (_e: unknown, evt: { from: string; to: string; tabId?: string }) => cb(evt)
+    ipcRenderer.on(IPC.HUB_MESSAGE_DELIVERED, handler)
+    return () => ipcRenderer.removeListener(IPC.HUB_MESSAGE_DELIVERED, handler)
+  },
   // Stream Deck → renderer panel hooks
   onStreamDeckOpenPanel: (cb: (panel: string) => void) => {
     const handler = (_e: unknown, panel: string) => cb(panel)

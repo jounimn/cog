@@ -51,3 +51,9 @@ html, body, #root {
 [data-motion="paused"] [data-anim] {
   animation: none !important;
 }
+
+/* Message in flight along a link: dash travels the trace (length set per path as --len) */
+@keyframes link-dash {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: calc(var(--len, 1000) * -1); }
+}

@@ -21,7 +21,7 @@ interface WorkspaceProps {
   zoom: number
   pan: { x: number; y: number }
   links: Array<{ from: string; to: string }>
-  groups: Array<{ id: string; color: string; members: string[] }>
+  groups: Array<{ id: string; name?: string; color: string; members: string[] }>
   onAddLink: (from: string, to: string) => void
   onRemoveLink: (from: string, to: string) => void
   onSetZoom: (level: number) => void
@@ -380,6 +380,7 @@ export function Workspace({
           groups={groups}
           windows={windows}
           agents={agents}
+          activeTabId={activeTabId}
           zoom={zoom}
           pan={pan}
           drawing={linkDrawing}

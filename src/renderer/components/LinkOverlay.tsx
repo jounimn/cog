@@ -1,11 +1,16 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import type { WindowState } from '../hooks/useWindowManager'
+import { Icon } from '../ui/Icon'
+import { c, font } from '../ui/tokens'
+import { motionStore } from '../appearance-store'
+import { linkKey, linkKeyForMessage } from '../link-message'
 
 interface LinkOverlayProps {
   links: Array<{ from: string; to: string }>
-  groups: Array<{ id: string; color: string; members: string[] }>
+  groups: Array<{ id: string; name?: string; color: string; members: string[] }>
   windows: WindowState[]
-  agents: Array<{ id: string; name: string }>
+  agents: Array<{ id: string; name: string; tabId?: string }>
+  activeTabId?: string
   zoom: number
   pan: { x: number; y: number }
   drawing: boolean
@@ -69,11 +74,75 @@ function buildOrthogonalPath(
   }
 }
 
+const FLIGHT_MS = 900
+const PORT = 6
+const CHIP_H = 18
+
+function prefersReducedMotion(): boolean {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches } catch { return false }
+}
+
+/** The in-flight message: a short hint-coloured dash travelling along the trace. */
+function MessageDash({ d }: { d: string }): React.ReactElement {
+  const ref = useRef<SVGPathElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el) el.style.setProperty('--len', String(el.getTotalLength()))
+  }, [d])
+  return (
+    <path
+      ref={ref}
+      data-anim
+      d={d}
+      fill="none"
+      strokeWidth={3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        stroke: c('hint'),
+        strokeDasharray: '18 2000',
+        pointerEvents: 'none',
+        animation: `link-dash ${FLIGHT_MS}ms var(--ease-out) forwards`
+      }}
+    />
+  )
+}
+
 export function LinkOverlay({
-  links, groups, windows, agents, zoom, pan,
+  links, groups, windows, agents, activeTabId = '', zoom, pan,
   drawing, drawFrom, drawTo, onRemoveLink
 }: LinkOverlayProps): React.ReactElement {
   const [hoveredLink, setHoveredLink] = useState<number | null>(null)
+  // Links with a message in flight: key -> run counter (a new message restarts the dash)
+  const [flights, setFlights] = useState<Record<string, number>>({})
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const latest = useRef({ links, agents, activeTabId })
+  latest.current = { links, agents, activeTabId }
+
+  useEffect(() => {
+    const pending = timers.current
+    const off = window.electronAPI.onHubMessageDelivered(evt => {
+      const cur = latest.current
+      const key = linkKeyForMessage(evt, cur.links, cur.agents, cur.activeTabId)
+      if (!key) return
+      setFlights(f => ({ ...f, [key]: (f[key] ?? 0) + 1 }))
+      const prev = pending.get(key)
+      if (prev) clearTimeout(prev)
+      pending.set(key, setTimeout(() => {
+        pending.delete(key)
+        setFlights(f => {
+          const rest = { ...f }
+          delete rest[key]
+          return rest
+        })
+      }, FLIGHT_MS))
+    })
+    return () => {
+      off()
+      pending.forEach(clearTimeout)
+      pending.clear()
+    }
+  }, [])
 
   const getWindowRect = (agentName: string): Rect | null => {
     const agent = agents.find(a => a.name === agentName)
@@ -95,17 +164,12 @@ export function LinkOverlay({
     return { x: rect.x, y: rect.y + rect.h / 2 }
   }
 
-  const getGroupColor = (from: string, to: string): string => {
-    for (const group of groups) {
-      if (group.members.includes(from) && group.members.includes(to)) {
-        return group.color
-      }
-    }
-    return '#666'
-  }
+  const getGroup = (from: string, to: string) =>
+    groups.find(g => g.members.includes(from) && g.members.includes(to))
 
   // Collect all window rects for obstacle avoidance
   const allRects: Rect[] = windows.map(w => ({ x: w.x, y: w.y, w: w.width, h: w.height }))
+  const reduced = prefersReducedMotion() || motionStore.get()
 
   return (
     <svg style={{
@@ -117,16 +181,31 @@ export function LinkOverlay({
         const toPos = getLeftPort(link.to)
         if (!fromPos || !toPos) return null
 
-        const color = getGroupColor(link.from, link.to)
+        const group = getGroup(link.from, link.to)
+        const color = group?.color ?? c('steel')
         const pathD = buildOrthogonalPath(fromPos, toPos, allRects, i)
         const isHovered = hoveredLink === i
+        const key = linkKey(link, agents)
+        const runs = key ? flights[key] : undefined
+        const inFlight = runs !== undefined
+        const chipName = group?.name?.trim()
 
         // Midpoint for delete button (approximate — use average of from/to)
         const midX = (fromPos.x + toPos.x) / 2
         const midY = (fromPos.y + toPos.y) / 2
+        const chipW = chipName ? Math.round(chipName.length * 6.4) + 34 : 0
+        const markerId = `link-arrow-${i}`
 
         return (
           <g key={`${link.from}-${link.to}-${i}`}>
+            <defs>
+              <marker
+                id={markerId} viewBox="0 0 10 10" refX={9} refY={5}
+                markerWidth={8} markerHeight={8} orient="auto" markerUnits="userSpaceOnUse"
+              >
+                <path d="M 0 1 L 10 5 L 0 9 z" fill={color} />
+              </marker>
+            </defs>
             {/* Invisible fat hitbox */}
             <path
               d={pathD}
@@ -138,23 +217,55 @@ export function LinkOverlay({
               onMouseEnter={() => setHoveredLink(i)}
               onMouseLeave={() => setHoveredLink(null)}
             />
-            {/* Visible orthogonal line */}
+            {/* Visible orthogonal trace */}
             <path
               d={pathD}
               stroke={color}
               strokeWidth={isHovered ? 2.5 : 1.5}
               fill="none"
-              opacity={isHovered ? 0.9 : 0.4}
+              opacity={isHovered ? 1 : 0.85}
               strokeLinejoin="round"
               strokeLinecap="round"
-              style={{ pointerEvents: 'none', transition: 'stroke-width 0.15s, opacity 0.15s' }}
+              markerEnd={`url(#${markerId})`}
+              style={{ pointerEvents: 'none', transition: 'stroke-width var(--dur), opacity var(--dur)' }}
             />
-            {/* Delete button at midpoint */}
+            {/* Ports where the trace meets each plate edge */}
+            {[fromPos, toPos].map((p, n) => (
+              <rect
+                key={n}
+                x={p.x - PORT / 2} y={p.y - PORT / 2} width={PORT} height={PORT}
+                fill={c('surface')} stroke={color} strokeWidth={1.5}
+                style={{ pointerEvents: 'none' }}
+              />
+            ))}
+            {/* Message in flight */}
+            {inFlight && !reduced && <MessageDash key={runs} d={pathD} />}
+            {/* Group chip at the midpoint, only for named groups */}
+            {chipName && !(isHovered && onRemoveLink) && (
+              <g transform={`translate(${midX - chipW / 2} ${midY - CHIP_H / 2})`} style={{ pointerEvents: 'none' }}>
+                <rect
+                  width={chipW} height={CHIP_H} rx={3}
+                  fill={c('surface')}
+                  stroke={inFlight && reduced ? c('hint') : c('line-strong')}
+                  strokeWidth={1} strokeDasharray="3 2"
+                />
+                <svg x={6} y={(CHIP_H - 10) / 2} width={10} height={10} style={{ color: c('ink-muted') }}>
+                  <Icon name="link" size={10} />
+                </svg>
+                <text
+                  x={22} y={CHIP_H / 2 + 0.5} dominantBaseline="middle"
+                  fontSize={11} fill={c('ink-muted')} style={{ fontFamily: font.text }}
+                >
+                  {chipName}
+                </text>
+              </g>
+            )}
+            {/* Delete badge at midpoint */}
             {isHovered && onRemoveLink && (
               <>
                 <circle
                   cx={midX} cy={midY} r={9}
-                  fill="#2a1a1a" stroke="#f44336" strokeWidth={1.5}
+                  fill={c('danger', 0.15)} stroke={c('danger')} strokeWidth={1.5}
                   style={{ pointerEvents: 'all', cursor: 'pointer' }}
                   onClick={() => onRemoveLink(link.from, link.to)}
                   onMouseEnter={() => setHoveredLink(i)}
@@ -162,8 +273,8 @@ export function LinkOverlay({
                 <text
                   x={midX} y={midY + 1}
                   textAnchor="middle" dominantBaseline="middle"
-                  fontSize={11} fill="#f44336" fontWeight="bold"
-                  style={{ pointerEvents: 'none' }}
+                  fontSize={11} fill={c('danger')} fontWeight="bold"
+                  style={{ pointerEvents: 'none', fontFamily: font.text }}
                 >
                   x
                 </text>
@@ -176,7 +287,7 @@ export function LinkOverlay({
       {drawing && drawFrom && drawTo && (
         <path
           d={`M ${drawFrom.x} ${drawFrom.y} H ${(drawFrom.x + drawTo.x) / 2} V ${drawTo.y} H ${drawTo.x}`}
-          stroke="#4a9eff" strokeWidth={2} strokeDasharray="5,5" opacity={0.8}
+          stroke={c('focus')} strokeWidth={2} strokeDasharray="5,5"
           fill="none" strokeLinejoin="round"
         />
       )}
