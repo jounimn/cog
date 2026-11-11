@@ -45,8 +45,9 @@ describe('mosaic-tree', () => {
   it('reconcile drops orphans, adds new next to focused, rebuilds from null', () => {
     const t = autoTile(['a','b'])!
     expect(leafIds(reconcile(t,['b']))).toEqual(['b'])
-    expect(reconcile(t,['a','b','n'],'a')).toEqual({ kind:'split', dir:'row', ratio:0.5,
-      a: { kind:'split', dir:'col', ratio:0.5, a:L('a'), b:L('n') }, b:L('b') })
+    // Focus b, not a: a is also where an unfocused insert would go (largest leaf, first on ties).
+    expect(reconcile(t,['a','b','n'],'b')).toEqual({ kind:'split', dir:'row', ratio:0.5,
+      a:L('a'), b: { kind:'split', dir:'col', ratio:0.5, a:L('b'), b:L('n') } })
     expect(reconcile(null,['x','y'])).toEqual(autoTile(['x','y']))
     expect(reconcile(t,[])).toBeNull()
   })
