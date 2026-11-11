@@ -16,8 +16,9 @@
     "build:mcp": "node scripts/build-mcp-server.mjs",
     "build:icons": "node scripts/build-icons.mjs",
     "preview": "electron-vite preview",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "node scripts/test.mjs run",
+    "test:watch": "node scripts/test.mjs watch",
+    "test:node": "vitest run"
   },
   "keywords": [],
   "author": "",
