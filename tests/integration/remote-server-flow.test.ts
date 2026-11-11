@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import request from 'supertest'
 import { TokenManager } from '../../src/main/remote/token-manager'
 import { RemoteServer } from '../../src/main/remote/remote-server'
+import { makeRemoteDeps } from '../helpers/remote-deps'
 
 describe('Remote server end-to-end flow', () => {
   it('full lifecycle: enable, fetch state, send message, post task, kill sessions', async () => {
@@ -9,7 +10,7 @@ describe('Remote server end-to-end flow', () => {
     const postedTasks: Array<{ title: string; description: string; priority: string }> = []
     const tm = new TokenManager()
 
-    const deps = {
+    const deps = makeRemoteDeps({
       tokenManager: tm,
       getProjectName: () => 'IntegrationTest',
       getAgents: () => [
@@ -28,7 +29,7 @@ describe('Remote server end-to-end flow', () => {
         postedTasks.push({ title, description, priority })
         return { id: `t${postedTasks.length - 1}`, title, priority }
       }
-    }
+    })
 
     const server = new RemoteServer(deps)
     const app = server.getApp()

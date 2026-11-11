@@ -2,23 +2,9 @@ import { describe, it, expect, vi } from 'vitest'
 import request from 'supertest'
 import { TokenManager } from '../../src/main/remote/token-manager'
 import { RemoteServer, type RemoteServerDeps } from '../../src/main/remote/remote-server'
+import { makeRemoteDeps } from '../helpers/remote-deps'
 
-function makeDeps(overrides: Partial<RemoteServerDeps> = {}): RemoteServerDeps {
-  return {
-    tokenManager: new TokenManager(() => 1_000_000),
-    getProjectName: () => 'TestProject',
-    getAgents: () => [],
-    getSchedules: () => [],
-    getPinboardTasks: () => [],
-    getAgentOutput: () => [],
-    sendMessage: vi.fn(),
-    pauseSchedule: vi.fn(),
-    resumeSchedule: vi.fn(),
-    restartSchedule: vi.fn(),
-    postTask: vi.fn(),
-    ...overrides
-  }
-}
+const makeDeps = (overrides: Partial<RemoteServerDeps> = {}): RemoteServerDeps => makeRemoteDeps(overrides)
 
 describe('RemoteServer auth middleware', () => {
   it('returns 404 when token is missing or invalid', async () => {
@@ -297,11 +283,12 @@ describe('RemoteServer rate limiting', () => {
 })
 
 describe('RemoteServer body size limit', () => {
-  it('returns 413 on a body larger than 4KB', async () => {
+  // The limit was raised from 4kb to 64kb on purpose (06c85c6).
+  it('returns 413 on a body larger than 64KB', async () => {
     const deps = makeDeps()
     const token = deps.tokenManager.generate()
     const server = new RemoteServer(deps)
-    const huge = 'x'.repeat(10_000)
+    const huge = 'x'.repeat(70_000)
     const res = await request(server.getApp())
       .post(`/r/${token}/message`)
       .send({ to: 'X', text: huge })

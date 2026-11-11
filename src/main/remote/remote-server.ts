@@ -166,6 +166,11 @@ export interface RemoteServerDeps {
     pauseReason: string | null
   }
   sendTrollboxMessage: (text: string, nick: string) => Promise<{ ok: boolean; error?: string }>
+  getPresets: () => Array<{
+    name: string
+    agentCount: number
+    agents: Array<{ name: string; cli: string; role: string }>
+  }>
 }
 
 // Find the static directory at runtime. In electron-vite dev mode, __dirname
