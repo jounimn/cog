@@ -36,7 +36,27 @@ export function ensureWorkDir(projectRoot: string, agentName: string): string {
   return workDir
 }
 
-const norm = (p: string): string => path.resolve(p).toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '')
+// Canonical form of a path, as git reports it. path.resolve alone keeps 8.3
+// short names (C:\Users\NAME~1.LOP) and symlinks/junctions, while git prints
+// the long real path — so resolve the deepest existing ancestor on disk and
+// re-append the parts that do not exist yet.
+function realish(p: string): string {
+  const resolved = path.resolve(p)
+  const rest: string[] = []
+  let cur = resolved
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync.native(cur), ...rest)
+    } catch {
+      const parent = path.dirname(cur)
+      if (parent === cur) return resolved
+      rest.unshift(path.basename(cur))
+      cur = parent
+    }
+  }
+}
+
+const norm = (p: string): string => realish(p).toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '')
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 function findRegistered(entries: WorktreeEntry[], worktreePath: string): WorktreeEntry | undefined {
