@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveMosaicTree, visibleMaximizedId, type DerivedTree } from './mosaic-view-state'
+import { closedPanesPatch, deriveMosaicTree, visibleMaximizedId, type DerivedTree } from './mosaic-view-state'
 import { leafIds, type MosaicNode } from './mosaic-tree'
 
 const L = (id: string) => ({ kind: 'leaf', id }) as const
@@ -69,5 +69,65 @@ describe('mosaic-view-state', () => {
     expect(visibleMaximizedId('b', [])).toBeNull()
     expect(visibleMaximizedId('b', ['a', 'b'])).toBe('b')
     expect(visibleMaximizedId(null, ['a'])).toBeNull()
+  })
+  describe('closedPanesPatch (Ruling 7: present -> absent is a user close)', () => {
+    const all = ['a', 'b', 'c']
+    const rendered = (ids: string[]): MosaicNode | null =>
+      deriveMosaicTree(saved, { stored: saved, tree: saved }, ids)
+
+    it('drops the closed leaf and clears maximizedId when it was the maximized pane', () => {
+      const patch = closedPanesPatch({ tree: saved, maximizedId: 'b' }, rendered(['a', 'c']), all, ['a', 'c'])
+      expect(patch).not.toBeNull()
+      expect(leafIds(patch!.tree)).toEqual(['a', 'c'])
+      expect(patch!.maximizedId).toBeNull()
+    })
+
+    it('keeps maximizedId when another pane closes', () => {
+      const patch = closedPanesPatch({ tree: saved, maximizedId: 'a' }, rendered(['a', 'c']), all, ['a', 'c'])
+      expect(patch!.maximizedId).toBe('a')
+    })
+
+    it('restart: windows arriving (absent -> present) never write, and the saved shape comes back', () => {
+      let prev: DerivedTree | undefined = undefined
+      let prevIds: string[] | undefined = undefined
+      for (const ids of [[], ['b'], ['b', 'a'], ['b', 'a', 'c']]) {
+        const tree = deriveMosaicTree(saved, prev, ids)
+        expect(closedPanesPatch({ tree: saved, maximizedId: 'b' }, tree, prevIds, ids)).toBeNull()
+        prev = { stored: saved, tree }
+        prevIds = ids
+      }
+      expect(prev?.tree).toEqual(saved)
+    })
+
+    it('a panel reopened after a close goes next to the focused pane, not back to its old slot', () => {
+      const patch = closedPanesPatch({ tree: saved, maximizedId: null }, rendered(['a', 'c']), all, ['a', 'c'])
+      const stored = patch!.tree
+      // In `saved`, b sat next to c; focus is on a.
+      const reopened = deriveMosaicTree(stored, { stored, tree: stored }, ['a', 'c', 'b'], 'a')
+      expect(sibling(reopened, 'b')).toEqual(L('a'))
+    })
+
+    it('no previous render of this tab session (tab switch, first render): no write', () => {
+      expect(closedPanesPatch({ tree: saved, maximizedId: 'b' }, rendered(['a']), undefined, ['a'])).toBeNull()
+    })
+
+    it('closing a pane the store never knew (unsaved insert) writes nothing', () => {
+      const withD = deriveMosaicTree(saved, { stored: saved, tree: saved }, ['a', 'b', 'c', 'd'], 'a')
+      const after = deriveMosaicTree(saved, { stored: saved, tree: withD }, all)
+      expect(closedPanesPatch({ tree: saved, maximizedId: null }, after, ['a', 'b', 'c', 'd'], all)).toBeNull()
+    })
+
+    it('a close while the layout is still hydrating keeps the slots of windows not back yet', () => {
+      const patch = closedPanesPatch({ tree: saved, maximizedId: null }, rendered([]), ['a'], [])
+      expect(leafIds(patch!.tree)).toEqual(['b', 'c'])
+    })
+
+    it('once hydrated, persists what is shown (unsaved inserts keep their place)', () => {
+      const withD = deriveMosaicTree(saved, { stored: saved, tree: saved }, ['a', 'b', 'c', 'd'], 'a')
+      const shown = deriveMosaicTree(saved, { stored: saved, tree: withD }, ['a', 'c', 'd'])
+      const patch = closedPanesPatch({ tree: saved, maximizedId: null }, shown, ['a', 'b', 'c', 'd'], ['a', 'c', 'd'])
+      expect(patch!.tree).toEqual(shown)
+      expect(sibling(patch!.tree, 'd')).toEqual(L('a'))
+    })
   })
 })

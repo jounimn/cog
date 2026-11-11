@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { mosaicStore, type MosaicTabState } from '../mosaic-store'
 import type { MosaicNode } from '../mosaic-tree'
-import { deriveMosaicTree, visibleMaximizedId, type DerivedTree } from '../mosaic-view-state'
+import { closedPanesPatch, deriveMosaicTree, visibleMaximizedId, type DerivedTree } from '../mosaic-view-state'
 
 /** Mosaic state tagged with the tab it belongs to, so it is never applied to another tab. */
 export type TaggedMosaicState = { tabId: string } & MosaicTabState
@@ -38,9 +38,10 @@ export function useMosaicState(activeTabId: string, windowIds: string[]): {
 
   // Focus is read, not tracked: focusing a pane must not move unsaved panes.
   const focusRef = useRef(focusedPaneId)
-  // Last COMMITTED render of this tab and the stored tree it came from, so
-  // unsaved inserts keep their place until the stored tree changes.
-  const prevRendered = useRef<({ tabId: string } & DerivedTree) | null>(null)
+  // Last COMMITTED render of this tab, the stored tree it came from and the
+  // windows it showed: unsaved inserts keep their place until the stored tree
+  // changes, and a window gone since then was closed (Ruling 7).
+  const prevRendered = useRef<({ tabId: string; ids: string[] } & DerivedTree) | null>(null)
 
   const idsKey = windowIds.join('\n')
   const tree = useMemo(() => {
@@ -56,13 +57,6 @@ export function useMosaicState(activeTabId: string, windowIds: string[]): {
   const hasWindows = windowIds.length > 0
   const latest = useRef({ mosaic, tree, hasWindows, activeTabId })
 
-  // Refs are written after commit, never during render.
-  useLayoutEffect(() => {
-    focusRef.current = focusedPaneId
-    prevRendered.current = { tabId: mosaic.tabId, stored: mosaic.tree, tree }
-    latest.current = { mosaic, tree, hasWindows, activeTabId }
-  })
-
   const updateMosaic = useCallback((patch: Partial<MosaicTabState>) => {
     const cur = latest.current
     if (cur.mosaic.tabId !== cur.activeTabId) return
@@ -75,6 +69,20 @@ export function useMosaicState(activeTabId: string, windowIds: string[]): {
     mosaicStore.save(tabId, state)
     setMosaicState(next)
   }, [])
+
+  // Refs are written after commit, never during render.
+  useLayoutEffect(() => {
+    const p = prevRendered.current
+    // Only a previous render of this same tab counts: a tab switch is not a close.
+    const prevIds = p?.tabId === mosaic.tabId ? p.ids : undefined
+    focusRef.current = focusedPaneId
+    prevRendered.current = { tabId: mosaic.tabId, stored: mosaic.tree, tree, ids: windowIds }
+    latest.current = { mosaic, tree, hasWindows, activeTabId }
+    // A window present in the last render and gone now was closed: drop its
+    // leaf (and its maximize) from storage so a reused panel id starts fresh.
+    const closed = closedPanesPatch(mosaic, tree, prevIds, windowIds)
+    if (closed) updateMosaic(closed)
+  })
 
   return { mosaic, tree, maximizedId, updateMosaic, focusedPaneId, setFocusedPaneId }
 }
