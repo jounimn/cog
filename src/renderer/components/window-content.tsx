@@ -14,15 +14,7 @@ import { RacAgentChat } from './RacAgentChat'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import { getPanelType } from '../panel-ids'
-
-export const STATUS_COLORS: Record<string, string> = {
-  idle: '#888',
-  active: '#4caf50',
-  working: '#ffc107',
-  disconnected: '#f44336',
-  sleeping: '#5c6bc0',
-  waking: '#29b6f6'
-}
+import type { PlateSpec } from './PlateHeader'
 
 export interface WindowContentContext {
   agents: AgentState[]
@@ -34,23 +26,11 @@ export function windowAgent(win: WindowState, agents: AgentState[]): AgentState 
   return !getPanelType(win.id) ? agents.find(a => a.id === win.id) : undefined
 }
 
-export function windowTitle(win: WindowState, agents: AgentState[]): string {
-  const agent = windowAgent(win, agents)
-  return agent
-    ? `${agent.name} (${agent.cli}) · ${agent.role}`
-    : win.title
-}
-
 /** The plate header's name and spec line: an agent shows `name · role` over its cli and model; a panel just its title. */
-export function windowHeading(win: WindowState, agents: AgentState[]): { title: string; spec?: string[] } {
+export function windowHeading(win: WindowState, agents: AgentState[]): { title: string; spec?: PlateSpec[] } {
   const agent = windowAgent(win, agents)
   if (!agent) return { title: win.title }
-  return { title: `${agent.name} · ${agent.role}`, spec: [agent.cli, agent.model].filter((s): s is string => !!s) }
-}
-
-export function windowStatusColor(win: WindowState, agents: AgentState[]): string | undefined {
-  const agent = windowAgent(win, agents)
-  return agent ? STATUS_COLORS[agent.status] ?? '#888' : undefined
+  return { title: `${agent.name} · ${agent.role}`, spec: [{ text: agent.cli }, { text: agent.model, mono: true }].filter(p => !!p.text) as PlateSpec[] }
 }
 
 export function renderWindowContent(win: WindowState, ctx: WindowContentContext): React.ReactNode {

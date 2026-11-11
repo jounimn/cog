@@ -31,10 +31,13 @@ export function PlateTicks({ inset }: { inset?: boolean }): React.ReactElement {
   )
 }
 
+/** One part of the spec line; `mono` marks data (a model name). */
+export interface PlateSpec { text: string; mono?: boolean }
+
 export interface PlateHeaderProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'title'> {
   title: string
   /** Data readout under the name (cli, model). Empty parts are omitted. */
-  spec?: Array<string | undefined>
+  spec?: PlateSpec[]
   status?: AgentStatus
   focused?: boolean
   accent?: PlateAccent
@@ -51,7 +54,7 @@ const stop = (e: React.SyntheticEvent): void => e.stopPropagation()
 export function PlateHeader({
   title, spec, status, focused, accent, maximized, onMaximize, onClose, extra, style, className, ...bar
 }: PlateHeaderProps): React.ReactElement {
-  const parts = (spec ?? []).filter((s): s is string => !!s)
+  const parts = (spec ?? []).filter(p => !!p.text)
   const cls = ['cog-plate__head', className].filter(Boolean).join(' ')
   return (
     <header
@@ -70,8 +73,8 @@ export function PlateHeader({
         <h2 title={title}>{title}</h2>
         {parts.length > 0 && (
           <div className="cog-plate__spec" style={{ fontFamily: 'var(--font-text)' }}>
-            {parts.map((s, i) => (
-              <span key={i} style={i === 1 ? { fontFamily: 'var(--font-mono)' } : undefined}>{s}</span>
+            {parts.map((p, i) => (
+              <span key={i} style={p.mono ? { fontFamily: 'var(--font-mono)' } : undefined}>{p.text}</span>
             ))}
           </div>
         )}

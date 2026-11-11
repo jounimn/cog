@@ -1,6 +1,6 @@
 import React from 'react'
 import type { AgentStatus, AgentTheme } from '../../shared/types'
-import { PlateHeader, PlateTicks, plateAccent } from './PlateHeader'
+import { PlateHeader, PlateTicks, plateAccent, type PlateSpec } from './PlateHeader'
 import { c } from '../ui'
 
 export interface MosaicPaneProps {
@@ -9,7 +9,7 @@ export interface MosaicPaneProps {
   agentName?: string
   title: string
   /** Agent cli and model, shown under the name. */
-  spec?: string[]
+  spec?: PlateSpec[]
   status?: AgentStatus
   /** The agent's theme; a non-default one tints the header and frame. */
   theme?: AgentTheme

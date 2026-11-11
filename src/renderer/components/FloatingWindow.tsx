@@ -5,14 +5,14 @@ import { getSnapZone, getWindowSnap, type SnapBounds, type SnapZoneInfo, type Wi
 import type { AgentTheme, AgentStatus } from '../../shared/types'
 import { cardPresentation } from '../sleep-ui'
 import { THEME_PRESETS, resolveTheme } from '../themes'
-import { PlateHeader, PlateTicks, plateAccent } from './PlateHeader'
+import { PlateHeader, PlateTicks, plateAccent, type PlateSpec } from './PlateHeader'
 import { Button, Icon, c, font } from '../ui'
 
 interface FloatingWindowProps {
   id: string
   title: string
   /** Agent cli and model, shown under the name. */
-  spec?: string[]
+  spec?: PlateSpec[]
   /** This is the focused window (the top one). */
   focused?: boolean
   x: number
