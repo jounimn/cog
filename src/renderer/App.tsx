@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { TopBar } from './components/TopBar'
 import { Workspace } from './components/Workspace'
 import { MosaicView } from './components/MosaicView'
+import type { WindowState } from './hooks/useWindowManager'
 import { useMosaicState } from './hooks/useMosaicState'
 import { mosaicStore } from './mosaic-store'
 import { leafIds } from './mosaic-tree'
@@ -22,6 +23,7 @@ import { WhatsNewDialog } from './components/WhatsNewDialog'
 import { EditAgentDialog } from './components/EditAgentDialog'
 import type { AgentConfig, AgentGroup, RecentProject, WindowPosition, CanvasState, WorkspaceTab, TeamProposal, InboxMessage } from '../shared/types'
 import { appearanceStore, motionStore } from './appearance-store'
+import { AppearanceDrawer } from './components/AppearanceDrawer'
 import { TeamProposalDialog } from './components/TeamProposalDialog'
 
 declare const electronAPI: {
@@ -333,6 +335,19 @@ export function App(): React.ReactElement {
 
   const tabAgents = agents.filter(a => !a.tabId || a.tabId === activeTabId)
 
+  // Focused agent for the appearance drawer: the focused Mosaic pane, or in
+  // Canvas the visible window with the highest zIndex (what focusWindow raises).
+  // Panel windows have no agent, so they resolve to undefined.
+  const focusedWindowId = mosaic.mode === 'mosaic'
+    ? (mosaicMaximizedId ?? focusedPaneId ?? undefined)
+    : tabWindows.filter(w => !w.minimized).reduce<WindowState | undefined>(
+        (top, w) => (!top || w.zIndex > top.zIndex ? w : top), undefined)?.id
+  const focusedAgentName = tabAgents.find(a => a.id === focusedWindowId)?.name
+  const focusedAgent = useMemo(
+    () => (focusedAgentName ? { name: focusedAgentName } : undefined),
+    [focusedAgentName]
+  )
+
   const handleClose = useCallback(async (windowId: string) => {
     // Panel windows just get removed, no agent to kill
     if (isPanelWindow(windowId)) {
@@ -411,6 +426,16 @@ export function App(): React.ReactElement {
     const id = panelIdForTab(INBOX_ID, activeTabId)
     if (inboxOpen) { removeWindow(id) } else { addWindow(id, 'Inbox', undefined, activeTabId) }
   }, [inboxOpen, addWindow, removeWindow, activeTabId])
+
+  // Terminal appearance drawer: open state is remembered across launches.
+  const [appearanceOpen, setAppearanceOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('cog.appearanceDrawer') === '1' } catch { return false }
+  })
+  const setAppearanceDrawer = useCallback((open: boolean, returnFocus = false) => {
+    setAppearanceOpen(open)
+    try { localStorage.setItem('cog.appearanceDrawer', open ? '1' : '0') } catch { /* storage unavailable */ }
+    if (!open && returnFocus) requestAnimationFrame(() => document.getElementById('appearance-toggle')?.focus())
+  }, [])
 
   const toggleBoard = useCallback(() => {
     const id = panelIdForTab(BOARD_ID, activeTabId)
@@ -850,7 +875,10 @@ export function App(): React.ReactElement {
             onToggleBoard={toggleBoard}
             viewMode={mosaic.mode}
             onToggleViewMode={toggleViewMode}
+            appearanceOpen={appearanceOpen}
+            onToggleAppearance={() => setAppearanceDrawer(!appearanceOpen)}
           />
+          <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           {mosaic.mode === 'mosaic' ? (
           <MosaicView
             windows={tabWindows}
@@ -899,6 +927,12 @@ export function App(): React.ReactElement {
             onWakeAgent={(id) => runSleepAction('wake', id)}
           />
           )}
+          <AppearanceDrawer
+            open={appearanceOpen}
+            onClose={() => setAppearanceDrawer(false, true)}
+            focusedAgent={focusedAgent}
+          />
+          </div>
           {showSpawnDialog && (
             <SpawnDialog
               onSpawn={handleSpawn}

@@ -4,6 +4,7 @@ import { TabBar } from './TabBar'
 import type { AgentState, KilledAgentSummary } from '../../shared/types'
 import { formatKilledAt } from '../killed-agents'
 import type { ViewMode } from '../mosaic-store'
+import { Button, Icon } from '../ui'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: '#888',
@@ -62,6 +63,8 @@ interface TopBarProps {
   onToggleBoard?: () => void
   viewMode: ViewMode
   onToggleViewMode: () => void
+  appearanceOpen: boolean
+  onToggleAppearance: () => void
 }
 
 function DropdownMenu({ items, onClose, style }: {
@@ -135,7 +138,8 @@ export function TopBar({
   groups, onLinkDragStart, linkDraggingFrom,
   tabs, activeTabId, onSwitchTab, onCreateTab, onCloseTab, onRenameTab,
   boardOpen, onToggleBoard,
-  viewMode, onToggleViewMode
+  viewMode, onToggleViewMode,
+  appearanceOpen, onToggleAppearance
 }: TopBarProps): React.ReactElement {
   const [agentMenuOpen, setAgentMenuOpen] = useState(false)
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
@@ -307,6 +311,16 @@ export function TopBar({
 
       {/* Right side controls */}
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }}>
+        <Button
+          id="appearance-toggle"
+          aria-expanded={appearanceOpen}
+          aria-controls="appearance-drawer"
+          onClick={onToggleAppearance}
+        >
+          <Icon name="palette" size={14} />
+          Terminal appearance
+        </Button>
+
         {/* Canvas | Mosaic view toggle */}
         <div role="group" aria-label="View mode" title="Toggle view (Ctrl+Shift+M)" style={{
           display: 'flex', height: '28px', border: '1px solid #444', borderRadius: '5px', overflow: 'hidden'
