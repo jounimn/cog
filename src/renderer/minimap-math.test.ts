@@ -27,6 +27,13 @@ describe('toMinimap', () => {
   })
 })
 
+describe('toMinimap with an empty view', () => {
+  it('stays finite for a zero-size view and no windows', () => {
+    const m = toMinimap(worldBounds([], { x0: 0, x1: 0, y0: 0, y1: 0 }), 160, 112)
+    expect(Object.values(m).every(Number.isFinite)).toBe(true)
+  })
+})
+
 describe('minimapClickToPan', () => {
   it('centres the viewport on the clicked world point', () => {
     const m = toMinimap({ x: 0, y: 0, w: 1000, h: 500 }, 160, 112)

@@ -1,7 +1,7 @@
 import React, { useRef } from 'react'
 import { c, font } from '../ui'
 import { visibleRange } from '../ruler'
-import { worldBounds, toMinimap, minimapClickToPan } from '../minimap-math'
+import { worldBounds, toMinimap, minimapClickToPan, type MinimapMap } from '../minimap-math'
 import type { WindowState } from '../hooks/useWindowManager'
 
 const MAP_W = 160
@@ -26,6 +26,8 @@ export function Minimap({
   windows, links, agents, focusedWindowId, zoom, pan, viewportWidth, viewportHeight, sheetName, onSetPan
 }: MinimapProps): React.ReactElement {
   const dragging = useRef(false)
+  // The map is frozen for the length of a drag: its bounds include the moving view rect.
+  const dragMap = useRef<MinimapMap | null>(null)
   const visible = windows.filter(w => !w.minimized)
   const view = visibleRange(zoom, pan, viewportWidth, viewportHeight)
   const m = toMinimap(worldBounds(visible, view), MAP_W, MAP_H)
@@ -39,7 +41,7 @@ export function Minimap({
 
   const panTo = (e: React.PointerEvent<SVGSVGElement>) => {
     const box = e.currentTarget.getBoundingClientRect()
-    const p = minimapClickToPan({ x: e.clientX - box.left, y: e.clientY - box.top }, m, zoom, viewportWidth, viewportHeight)
+    const p = minimapClickToPan({ x: e.clientX - box.left, y: e.clientY - box.top }, dragMap.current ?? m, zoom, viewportWidth, viewportHeight)
     onSetPan(p.x, p.y)
   }
 
@@ -64,15 +66,18 @@ export function Minimap({
         onPointerDown={e => {
           e.stopPropagation()
           dragging.current = true
+          dragMap.current = m
           e.currentTarget.setPointerCapture(e.pointerId)
           panTo(e)
         }}
         onPointerMove={e => { if (dragging.current) panTo(e) }}
         onPointerUp={e => {
           dragging.current = false
+          dragMap.current = null
           if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
         }}
-        onPointerCancel={() => { dragging.current = false }}
+        onPointerCancel={() => { dragging.current = false; dragMap.current = null }}
+        onLostPointerCapture={() => { dragging.current = false; dragMap.current = null }}
       >
         {links.map((l, i) => {
           const a = rectOf(l.from)
@@ -108,7 +113,7 @@ export function Minimap({
         </div>
         <div style={{ ...cell, borderLeft: `1px solid ${c('line-strong')}` }}>
           <dt style={label}>Scale</dt>
-          <dd style={{ ...value, fontFamily: font.mono }}>{`1:${Math.round(1 / m.scale)}`}</dd>
+          <dd style={{ ...value, fontFamily: font.mono }}>{`1:${Math.max(1, Math.round(1 / m.scale))}`}</dd>
         </div>
       </dl>
     </div>

@@ -16,8 +16,8 @@ import { clientToCanvas } from '../canvas-math'
 import { getPanelType } from '../panel-ids'
 import { renderWindowContent, windowAgent, windowHeading } from './window-content'
 
-/** Layout colour sent to remote clients, which have no CSS tokens; equals --ink-subtle. */
-const REMOTE_FALLBACK_COLOR = 'rgb(136 152 174)'
+/** Layout colour sent to remote clients, which have no CSS tokens; keeps the previous grey. */
+const REMOTE_FALLBACK_COLOR = 'rgb(136 136 136)'
 
 interface WorkspaceProps {
   windows: WindowState[]
