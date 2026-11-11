@@ -104,6 +104,11 @@ function createTerminal(agentId: string): TerminalHandle {
 
 export const terminalRegistry = createTerminalRegistry<TerminalHandle>(createTerminal)
 
+/** Give keyboard focus to the agent's terminal, if it has one (never creates it). */
+export function focusTerminal(agentId: string): void {
+  if (terminalRegistry.has(agentId)) terminalRegistry.acquire(agentId).term.focus()
+}
+
 export function TerminalWindow({ agentId, theme }: TerminalWindowProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
 

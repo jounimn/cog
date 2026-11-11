@@ -14,7 +14,7 @@ import { ProjectPickerDialog } from './components/ProjectPickerDialog'
 import { useWindowManager } from './hooks/useWindowManager'
 import { loadWindowBounds, saveWindowBounds, deleteWindowBounds } from './window-layout'
 import { viewportStore } from './viewport-store'
-import { terminalRegistry } from './components/TerminalWindow'
+import { focusTerminal, terminalRegistry } from './components/TerminalWindow'
 import { useAgents } from './hooks/useAgents'
 import { killConfirmText } from './killed-agents'
 import { UpdateNotice } from './components/UpdateNotice'
@@ -114,6 +114,32 @@ export function App(): React.ReactElement {
   const toggleViewMode = useCallback(() => {
     updateMosaic({ mode: mosaic.mode === 'mosaic' ? 'canvas' : 'mosaic' })
   }, [updateMosaic, mosaic.mode])
+
+  // The one way to focus a Mosaic pane (click, Ctrl+Tab, Ctrl+1..9): highlight
+  // it and give its terminal the keyboard. Never focusWindow, which is canvas
+  // state (un-minimizes, raises zIndex). The terminal is focused on the next
+  // frame, after a header press has finished moving focus to the page.
+  const focusPane = useCallback((id: string) => {
+    setFocusedPaneId(id)
+    requestAnimationFrame(() => focusTerminal(id))
+  }, [setFocusedPaneId])
+
+  // Panes remount when the tree changes shape, a pane is (un)maximized or the
+  // view switches to Mosaic, and the remounted terminal has lost the keyboard:
+  // give it back to the focused pane, unless the user is typing in a field.
+  const focusedPaneRef = React.useRef(focusedPaneId)
+  focusedPaneRef.current = focusedPaneId
+  useEffect(() => {
+    if (mosaic.mode !== 'mosaic') return
+    const raf = requestAnimationFrame(() => {
+      const id = focusedPaneRef.current
+      const active = document.activeElement
+      const typing = active instanceof HTMLElement && !active.closest('.xterm') &&
+        (active.matches('input, textarea, select') || active.isContentEditable)
+      if (id && !typing) focusTerminal(id)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [mosaic.mode, mosaicTree, mosaicMaximizedId])
 
   // ── Per-tab viewport ───────────────────────────────────────────────────────
   // Each tab lays its windows out in its own region of the canvas, so the view
@@ -534,16 +560,24 @@ export function App(): React.ReactElement {
     let currentFocusIdx = 0
     const inMosaic = mosaic.mode === 'mosaic'
     const handler = (e: KeyboardEvent) => {
-      // Ctrl+Shift+M = toggle Canvas / Mosaic
+      // Ctrl+Shift+M = toggle Canvas / Mosaic (once per press, not per auto-repeat)
       if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'm') {
-        toggleViewMode()
+        if (!e.repeat) toggleViewMode()
         e.preventDefault()
         return
       }
+      // Mosaic panes in on-screen order (Ctrl+1..9 and Ctrl+Tab). While one is
+      // maximized the others are not shown, so these switch the maximized pane.
+      const paneIds = inMosaic ? leafIds(mosaicTree) : []
+      const goToPane = (id: string): void => {
+        if (mosaicMaximizedId !== null && id !== mosaicMaximizedId) updateMosaic({ maximizedId: id })
+        focusPane(id)
+      }
       if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
         const idx = parseInt(e.key) - 1
-        if (tabWindows[idx]) {
-          if (inMosaic) setFocusedPaneId(tabWindows[idx].id)
+        if (inMosaic) {
+          if (paneIds[idx]) goToPane(paneIds[idx])
+        } else if (tabWindows[idx]) {
           focusWindow(tabWindows[idx].id)
           currentFocusIdx = idx
         }
@@ -551,12 +585,11 @@ export function App(): React.ReactElement {
       }
       if (e.ctrlKey && e.key === 'Tab') {
         if (inMosaic) {
-          // Cycle panes in tree order, starting after the focused one.
-          const ids = leafIds(mosaicTree)
-          if (ids.length > 0) {
-            const next = ids[(ids.indexOf(focusedPaneId ?? '') + 1) % ids.length]
-            setFocusedPaneId(next)
-            focusWindow(next)
+          // Cycle panes in tree order, starting after the focused one (the
+          // maximized one while a pane is maximized).
+          if (paneIds.length > 0) {
+            const from = mosaicMaximizedId ?? focusedPaneId ?? ''
+            goToPane(paneIds[(paneIds.indexOf(from) + 1) % paneIds.length])
           }
         } else if (tabWindows.length > 0) {
           currentFocusIdx = (currentFocusIdx + 1) % tabWindows.length
@@ -580,7 +613,7 @@ export function App(): React.ReactElement {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId, mosaic, mosaicTree, focusedPaneId, setFocusedPaneId, toggleViewMode])
+  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId, mosaic, mosaicTree, mosaicMaximizedId, focusedPaneId, focusPane, updateMosaic, toggleViewMode])
 
   useEffect(() => {
     electronAPI.getProject().then((p: RecentProject | null) => {
@@ -815,7 +848,7 @@ export function App(): React.ReactElement {
             focusedId={focusedPaneId}
             onTreeChange={tree => updateMosaic({ tree })}
             onMaximize={id => updateMosaic({ maximizedId: id })}
-            onFocus={id => { setFocusedPaneId(id); focusWindow(id) }}
+            onFocus={focusPane}
             onClose={handleClose}
             onSpawnClick={() => setShowSpawnDialog(true)}
           />
