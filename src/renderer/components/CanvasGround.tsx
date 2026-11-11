@@ -1,10 +1,9 @@
 import React from 'react'
 import { c } from '../ui/tokens'
-import { visibleRange } from '../ruler'
+import { crosshairPoints, visibleRange } from '../ruler'
 
 const MINOR = 24
 const MAJOR = 120
-const MAX_CROSSHAIRS = 60
 const CROSS = 17
 
 interface CanvasGroundProps {
@@ -17,21 +16,14 @@ interface CanvasGroundProps {
 const fill: React.CSSProperties = { position: 'absolute', inset: 0, pointerEvents: 'none' }
 
 /** Drafting-board ground: masked grid plus registration crosshairs at major intersections. */
-export function CanvasGround({ zoom, pan, width, height }: CanvasGroundProps) {
+export const CanvasGround = React.memo(function CanvasGround({ zoom, pan, width, height }: CanvasGroundProps) {
   const major = MAJOR * zoom
   const minor = MINOR * zoom
   const line = (dir: 'right' | 'bottom', alpha: number) =>
     `linear-gradient(to ${dir}, ${c('grid', alpha)} 1px, transparent 1px)`
 
   const range = visibleRange(zoom, pan, width, height)
-  const marks: { x: number; y: number }[] = []
-  const firstX = Math.ceil(range.x0 / MAJOR) * MAJOR
-  const firstY = Math.ceil(range.y0 / MAJOR) * MAJOR
-  for (let y = firstY; y <= range.y1 && marks.length < MAX_CROSSHAIRS; y += MAJOR) {
-    for (let x = firstX; x <= range.x1 && marks.length < MAX_CROSSHAIRS; x += MAJOR) {
-      marks.push({ x: x * zoom + pan.x, y: y * zoom + pan.y })
-    }
-  }
+  const marks = crosshairPoints(range).map(p => ({ x: p.x * zoom + pan.x, y: p.y * zoom + pan.y }))
 
   const mask = 'radial-gradient(ellipse 75% 70% at 46% 44%, black 35%, transparent 100%)'
 
@@ -71,4 +63,4 @@ export function CanvasGround({ zoom, pan, width, height }: CanvasGroundProps) {
       ))}
     </div>
   )
-}
+})

@@ -36,3 +36,35 @@ export function visibleRange(
     y1: Math.round((h - pan.y) / zoom) + 0
   }
 }
+
+const MAJOR_SPACING = 120
+
+function multiples(from: number, to: number, step: number): number[] {
+  const out: number[] = []
+  for (let v = Math.ceil(from / step) * step; v <= to; v += step) out.push(v + 0)
+  return out
+}
+
+/**
+ * Major-grid intersections (world coords) inside a visible range, thinned by
+ * power-of-two strides until at most `max` remain, so marks spread evenly over
+ * the viewport instead of filling only the first rows. The stride is uniform
+ * on both axes first; each axis is then refined (halved) while the count still
+ * fits, so a wide, short remainder does not leave a whole axis nearly empty.
+ */
+export function crosshairPoints(
+  range: { x0: number; x1: number; y0: number; y1: number },
+  max = 60
+): { x: number; y: number }[] {
+  const count = (sx: number, sy: number) =>
+    multiples(range.x0, range.x1, MAJOR_SPACING * sx).length *
+    multiples(range.y0, range.y1, MAJOR_SPACING * sy).length
+  let sx = 1
+  while (count(sx, sx) > max) sx *= 2
+  let sy = sx
+  while (sy > 1 && count(sx, sy / 2) <= max) sy /= 2
+  while (sx > 1 && count(sx / 2, sy) <= max) sx /= 2
+  const xs = multiples(range.x0, range.x1, MAJOR_SPACING * sx)
+  const ys = multiples(range.y0, range.y1, MAJOR_SPACING * sy)
+  return ys.flatMap(y => xs.map(x => ({ x, y })))
+}

@@ -24,7 +24,7 @@ const numStyle: React.CSSProperties = {
 }
 
 /** Transparent top and left rulers showing true canvas coordinates; never intercept the pointer. */
-export function Rulers({ zoom, pan, width, height }: RulersProps) {
+export const Rulers = React.memo(function Rulers({ zoom, pan, width, height }: RulersProps) {
   const major = rulerStep(zoom) * zoom
   const minor = major / MINOR_DIVISIONS
   const xTicks = rulerTicks(zoom, pan.x, width).filter(t => t.px >= RULER_Y_WIDTH + 4)
@@ -78,4 +78,4 @@ export function Rulers({ zoom, pan, width, height }: RulersProps) {
       <div style={{ position: 'absolute', left: 0, top: 0, width: RULER_Y_WIDTH, height: RULER_X_HEIGHT, borderRight: edge, borderBottom: edge, opacity: 0.7 }} />
     </div>
   )
-}
+})
