@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveMosaicTree, visibleMaximizedId } from './mosaic-view-state'
+import { deriveMosaicTree, visibleMaximizedId, type DerivedTree } from './mosaic-view-state'
 import { leafIds, type MosaicNode } from './mosaic-tree'
 
 const L = (id: string) => ({ kind: 'leaf', id }) as const
@@ -25,16 +25,16 @@ describe('mosaic-view-state', () => {
   })
 
   it('progressive hydration restores the saved shape', () => {
-    let prev: MosaicNode | null | undefined = undefined
+    let prev: DerivedTree | undefined = undefined
     for (const ids of [[], ['b'], ['b', 'a'], ['b', 'a', 'c']]) {
-      prev = deriveMosaicTree(saved, prev, ids)
+      prev = { stored: saved, tree: deriveMosaicTree(saved, prev, ids) }
     }
-    expect(prev).toEqual(saved)
+    expect(prev?.tree).toEqual(saved)
   })
 
   it('keeps a window added since the last save where it was placed', () => {
-    const withD = deriveMosaicTree(saved, saved, ['a', 'b', 'c', 'd'], 'a')
-    const withE = deriveMosaicTree(saved, withD, ['a', 'b', 'c', 'd', 'e'], 'c')
+    const withD = deriveMosaicTree(saved, { stored: saved, tree: saved }, ['a', 'b', 'c', 'd'], 'a')
+    const withE = deriveMosaicTree(saved, { stored: saved, tree: withD }, ['a', 'b', 'c', 'd', 'e'], 'c')
     // d still sits next to a (its first placement), e went next to c.
     expect(sibling(withE, 'd')).toEqual(L('a'))
     expect(sibling(withE, 'e')).toEqual(L('c'))
@@ -42,7 +42,23 @@ describe('mosaic-view-state', () => {
   })
 
   it('a closed window drops out of the rendered tree', () => {
-    expect(leafIds(deriveMosaicTree(saved, saved, ['a', 'c']))).toEqual(['a', 'c'])
+    expect(leafIds(deriveMosaicTree(saved, { stored: saved, tree: saved }, ['a', 'c']))).toEqual(['a', 'c'])
+  })
+
+  it('a user edit that changes only a ratio is what gets rendered', () => {
+    const prev: DerivedTree = { stored: saved, tree: saved }
+    const edited: MosaicNode = { ...(saved as Extract<MosaicNode, { kind: 'split' }>), ratio: 0.8 }
+    expect(deriveMosaicTree(edited, prev, ['a', 'b', 'c'])).toEqual(edited)
+  })
+
+  it('a user edit that reshapes the tree (same leaves) is what gets rendered', () => {
+    const prev: DerivedTree = { stored: saved, tree: saved }
+    const moved: MosaicNode = {
+      kind: 'split', dir: 'col', ratio: 0.4,
+      a: { kind: 'split', dir: 'row', ratio: 0.6, a: L('c'), b: L('a') },
+      b: L('b')
+    }
+    expect(deriveMosaicTree(moved, prev, ['a', 'b', 'c'])).toEqual(moved)
   })
 
   it('with nothing stored, tiles the windows', () => {

@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { mosaicStore, type MosaicTabState } from '../mosaic-store'
 import type { MosaicNode } from '../mosaic-tree'
-import { deriveMosaicTree, visibleMaximizedId } from '../mosaic-view-state'
+import { deriveMosaicTree, visibleMaximizedId, type DerivedTree } from '../mosaic-view-state'
 
 /** Mosaic state tagged with the tab it belongs to, so it is never applied to another tab. */
 export type TaggedMosaicState = { tabId: string } & MosaicTabState
@@ -38,22 +38,30 @@ export function useMosaicState(activeTabId: string, windowIds: string[]): {
 
   // Focus is read, not tracked: focusing a pane must not move unsaved panes.
   const focusRef = useRef(focusedPaneId)
-  focusRef.current = focusedPaneId
-  // Previously rendered tree of this tab, so unsaved inserts keep their place.
-  const prevRendered = useRef<{ tabId: string; tree: MosaicNode | null } | null>(null)
+  // Last COMMITTED render of this tab and the stored tree it came from, so
+  // unsaved inserts keep their place until the stored tree changes.
+  const prevRendered = useRef<({ tabId: string } & DerivedTree) | null>(null)
 
   const idsKey = windowIds.join('\n')
   const tree = useMemo(() => {
     const ids = idsKey ? idsKey.split('\n') : []
-    const prev = prevRendered.current?.tabId === mosaic.tabId ? prevRendered.current.tree : undefined
+    const p = prevRendered.current
+    const prev = p?.tabId === mosaic.tabId ? p : undefined
     return deriveMosaicTree(mosaic.tree, prev, ids, focusRef.current ?? undefined)
   }, [mosaic.tabId, mosaic.tree, idsKey])
-  prevRendered.current = { tabId: mosaic.tabId, tree }
   const maximizedId = visibleMaximizedId(mosaic.maximizedId, windowIds)
 
-  // Latest values, updated eagerly so several patches in one tick compose.
-  const latest = useRef({ mosaic, tree, hasWindows: windowIds.length > 0, activeTabId })
-  latest.current = { mosaic, tree, hasWindows: windowIds.length > 0, activeTabId }
+  // Latest committed values for updateMosaic (also updated eagerly by it, so
+  // several patches in one tick compose).
+  const hasWindows = windowIds.length > 0
+  const latest = useRef({ mosaic, tree, hasWindows, activeTabId })
+
+  // Refs are written after commit, never during render.
+  useLayoutEffect(() => {
+    focusRef.current = focusedPaneId
+    prevRendered.current = { tabId: mosaic.tabId, stored: mosaic.tree, tree }
+    latest.current = { mosaic, tree, hasWindows, activeTabId }
+  })
 
   const updateMosaic = useCallback((patch: Partial<MosaicTabState>) => {
     const cur = latest.current

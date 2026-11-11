@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { MosaicPane } from './MosaicPane'
 import { renderWindowContent, windowAgent, windowStatusColor, windowTitle } from './window-content'
 import { setRatio, type MosaicNode, type MosaicPath } from '../mosaic-tree'
@@ -48,7 +48,7 @@ export function MosaicView({
   const shownTree = dragTree ?? tree
   // Latest tree for divider drags, which fire faster than re-renders.
   const treeRef = useRef(shownTree)
-  treeRef.current = shownTree
+  useLayoutEffect(() => { treeRef.current = shownTree })
 
   const maximizedWin = maximizedId ? windows.find(w => w.id === maximizedId) : undefined
 
