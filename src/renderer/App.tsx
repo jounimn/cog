@@ -115,7 +115,7 @@ export function App(): React.ReactElement {
     updateMosaic({ mode: mosaic.mode === 'mosaic' ? 'canvas' : 'mosaic' })
   }, [updateMosaic, mosaic.mode])
 
-  // The one way to focus a Mosaic pane (click, Ctrl+Tab, Ctrl+1..9): highlight
+  // The one way to focus a Mosaic pane (click, shortcuts, pills, panels; see focusInView): highlight
   // it and give its terminal the keyboard. Never focusWindow, which is canvas
   // state (un-minimizes, raises zIndex). The terminal is focused on the next
   // frame, after a header press has finished moving focus to the page.
@@ -123,6 +123,18 @@ export function App(): React.ReactElement {
     setFocusedPaneId(id)
     requestAnimationFrame(() => focusTerminal(id))
   }, [setFocusedPaneId])
+
+  // Focus a window in whichever view is showing: canvas raises/un-minimizes it
+  // (focusWindow); Mosaic focuses its pane and leaves canvas state alone. While
+  // a pane is maximized the others are hidden, so going to another of the
+  // tab's panes makes it the maximized one.
+  const focusInView = useCallback((id: string) => {
+    if (mosaic.mode !== 'mosaic') { focusWindow(id); return }
+    if (mosaicMaximizedId !== null && id !== mosaicMaximizedId && leafIds(mosaicTree).includes(id)) {
+      updateMosaic({ maximizedId: id })
+    }
+    focusPane(id)
+  }, [mosaic.mode, mosaicMaximizedId, mosaicTree, focusWindow, updateMosaic, focusPane])
 
   // Panes remount when the tree changes shape, a pane is (un)maximized or the
   // view switches to Mosaic, and the remounted terminal has lost the keyboard:
@@ -347,8 +359,8 @@ export function App(): React.ReactElement {
   }, [killAgent, removeWindow, agents])
 
   const handleAgentPillClick = useCallback((agentId: string) => {
-    focusWindow(agentId)
-  }, [focusWindow])
+    focusInView(agentId)
+  }, [focusInView])
 
   const handleClearContext = useCallback(async (agentId: string) => {
     await window.electronAPI.clearAgentContext(agentId)
@@ -567,16 +579,13 @@ export function App(): React.ReactElement {
         return
       }
       // Mosaic panes in on-screen order (Ctrl+1..9 and Ctrl+Tab). While one is
-      // maximized the others are not shown, so these switch the maximized pane.
+      // maximized the others are not shown, so these switch the maximized pane
+      // (focusInView).
       const paneIds = inMosaic ? leafIds(mosaicTree) : []
-      const goToPane = (id: string): void => {
-        if (mosaicMaximizedId !== null && id !== mosaicMaximizedId) updateMosaic({ maximizedId: id })
-        focusPane(id)
-      }
       if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
         const idx = parseInt(e.key) - 1
         if (inMosaic) {
-          if (paneIds[idx]) goToPane(paneIds[idx])
+          if (paneIds[idx]) focusInView(paneIds[idx])
         } else if (tabWindows[idx]) {
           focusWindow(tabWindows[idx].id)
           currentFocusIdx = idx
@@ -589,7 +598,7 @@ export function App(): React.ReactElement {
           // maximized one while a pane is maximized).
           if (paneIds.length > 0) {
             const from = mosaicMaximizedId ?? focusedPaneId ?? ''
-            goToPane(paneIds[(paneIds.indexOf(from) + 1) % paneIds.length])
+            focusInView(paneIds[(paneIds.indexOf(from) + 1) % paneIds.length])
           }
         } else if (tabWindows.length > 0) {
           currentFocusIdx = (currentFocusIdx + 1) % tabWindows.length
@@ -613,7 +622,7 @@ export function App(): React.ReactElement {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId, mosaic, mosaicTree, mosaicMaximizedId, focusedPaneId, focusPane, updateMosaic, toggleViewMode])
+  }, [tabWindows, focusWindow, focusInView, userSetZoom, userSetPan, zoomToFit, activeTabId, mosaic, mosaicTree, mosaicMaximizedId, focusedPaneId, toggleViewMode])
 
   useEffect(() => {
     electronAPI.getProject().then((p: RecentProject | null) => {
@@ -715,7 +724,7 @@ export function App(): React.ReactElement {
       }
       if (action === 'open' || (action === 'toggle' && !isOpen)) {
         if (isOpen) {
-          focusWindow(id)
+          focusInView(id)
         } else {
           addWindow(id, titleByType[type], undefined, activeTabId)
         }
@@ -724,7 +733,7 @@ export function App(): React.ReactElement {
       }
     })
     return cleanup
-  }, [windows, activeTabId, addWindow, removeWindow, focusWindow])
+  }, [windows, activeTabId, addWindow, removeWindow, focusInView])
 
   // Clear editingAgentId if the agent disappears (killed externally)
   useEffect(() => {
@@ -749,13 +758,13 @@ export function App(): React.ReactElement {
         const title = panel === 'inbox' ? 'Inbox' : panel === 'trollbox' ? 'Trollbox' : 'Pinboard'
         addWindow(id, title, undefined, activeTabId)
       }
-      focusWindow(id)
+      focusInView(id)
     })
     const unsubFocus = window.electronAPI.onStreamDeckFocusAgent((name) => {
       // Agent windows are keyed by agent.id, but the bridge sends agent.name.
       // Find the agent in the registry → focus its window by id.
       const agent = agents.find(a => a.name === name)
-      if (agent?.id) focusWindow(agent.id)
+      if (agent?.id) focusInView(agent.id)
     })
     const unsubRead = window.electronAPI.onStreamDeckMarkRead((kind) => {
       // Mark-read for inbox/trollbox. The renderer doesn't currently track unread
@@ -773,7 +782,7 @@ export function App(): React.ReactElement {
       unsubRead()
       unsubToast()
     }
-  }, [agents, tabWindows, activeTabId, addWindow, focusWindow])
+  }, [agents, tabWindows, activeTabId, addWindow, focusInView])
 
   const handleProjectOpened = useCallback((p: RecentProject) => {
     setProject(p)
