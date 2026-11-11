@@ -97,12 +97,14 @@ export function MosaicView({
       <MosaicPane
         key={win.id}
         id={win.id}
+        agentName={agent?.name}
         title={windowTitle(win, agents)}
         statusColor={windowStatusColor(win, agents)}
         linkedNames={agent ? linkedAgentNames(agent, agents, links) : []}
         focused={win.id === focusedId}
         maximized={maximized}
-        onFocus={() => { if (win.id !== focusedId) onFocus(win.id) }}
+        // Also for the focused pane: a click gives its terminal the keyboard back.
+        onFocus={() => onFocus(win.id)}
         onToggleMaximize={() => onMaximize(maximized ? null : win.id)}
         onClose={() => onClose(win.id)}
         onHeaderPointerDown={maximized || maximizedWin ? undefined : e => startPaneDrag(e, win.id)}
@@ -128,6 +130,8 @@ export function MosaicView({
         if (Math.hypot(ev.clientX - startX, ev.clientY - startY) <= DRAG_THRESHOLD) return
         active = true
         setDraggingId(id)
+        // Escape cancels only an actual drag, not a press that may still be a click.
+        window.addEventListener('keydown', onKey, true)
       }
       const leaf = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-mosaic-leaf]')
       const targetId = leaf?.dataset.mosaicLeaf
@@ -148,12 +152,9 @@ export function MosaicView({
       setDropTarget(next)
     }
     const finish = (drop: boolean): void => {
-      paneDragCleanup.current = null
+      // Listeners go first: releasing the capture fires lostpointercapture.
+      paneDragCleanup.current?.()
       try { if (header.hasPointerCapture(pointerId)) header.releasePointerCapture(pointerId) } catch { /* detached */ }
-      header.removeEventListener('pointermove', onMove)
-      header.removeEventListener('pointerup', onUp)
-      header.removeEventListener('pointercancel', onCancel)
-      window.removeEventListener('keydown', onKey, true)
       setDraggingId(null)
       setDropTarget(null)
       const current = treeRef.current
@@ -164,6 +165,7 @@ export function MosaicView({
     }
     const onUp = (): void => finish(true)
     const onCancel = (): void => finish(false)
+    const onLostCapture = (ev: PointerEvent): void => { if (ev.pointerId === pointerId) finish(false) }
     const onKey = (ev: KeyboardEvent): void => {
       if (ev.key !== 'Escape') return
       // Escape only cancels the drag; nothing else sees it.
@@ -174,12 +176,17 @@ export function MosaicView({
     header.addEventListener('pointermove', onMove)
     header.addEventListener('pointerup', onUp)
     header.addEventListener('pointercancel', onCancel)
-    window.addEventListener('keydown', onKey, true)
+    // The header can remount mid-drag (e.g. an agent spawned next to the
+    // dragged pane splits its leaf): its pointerup never arrives, but the lost
+    // capture does — at the document once the header is detached — so the
+    // drag still ends.
+    document.addEventListener('lostpointercapture', onLostCapture)
     paneDragCleanup.current = () => {
       paneDragCleanup.current = null
       header.removeEventListener('pointermove', onMove)
       header.removeEventListener('pointerup', onUp)
       header.removeEventListener('pointercancel', onCancel)
+      document.removeEventListener('lostpointercapture', onLostCapture)
       window.removeEventListener('keydown', onKey, true)
     }
   }
@@ -191,7 +198,7 @@ export function MosaicView({
     e.preventDefault()
     divider.setPointerCapture(e.pointerId)
     let dragged: MosaicNode | null = null
-    const move = (ev: PointerEvent): void => {
+    const onMove = (ev: PointerEvent): void => {
       const current = treeRef.current
       if (!current) return
       const rect = container.getBoundingClientRect()
@@ -208,13 +215,13 @@ export function MosaicView({
     }
     const end = (ev: PointerEvent): void => {
       if (divider.hasPointerCapture(ev.pointerId)) divider.releasePointerCapture(ev.pointerId)
-      divider.removeEventListener('pointermove', move)
+      divider.removeEventListener('pointermove', onMove)
       divider.removeEventListener('pointerup', end)
       divider.removeEventListener('pointercancel', end)
       if (dragged) onTreeChange(dragged)
       setDragTree(null)
     }
-    divider.addEventListener('pointermove', move)
+    divider.addEventListener('pointermove', onMove)
     divider.addEventListener('pointerup', end)
     divider.addEventListener('pointercancel', end)
   }
@@ -247,7 +254,11 @@ export function MosaicView({
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', backgroundColor: '#111', padding: DIVIDER, boxSizing: 'border-box' }}>
+    <div style={{
+      flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', backgroundColor: '#111', padding: DIVIDER, boxSizing: 'border-box',
+      // No text selection in the panes while one is being dragged.
+      userSelect: draggingId ? 'none' : undefined
+    }}>
       {maximizedWin ? (
         renderPane(maximizedWin)
       ) : windows.length === 0 ? (

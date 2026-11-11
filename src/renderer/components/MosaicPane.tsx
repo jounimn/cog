@@ -2,6 +2,8 @@ import React from 'react'
 
 export interface MosaicPaneProps {
   id: string
+  /** The agent's name for agent panes: lets an agent pill be dropped here to link (like a canvas window). */
+  agentName?: string
   title: string
   statusColor?: string
   /** Agents linked to this one; the header shows `⇄ N`, names in the tooltip. */
@@ -20,13 +22,14 @@ export interface MosaicPaneProps {
 
 /** One tile of the Mosaic view: a FloatingWindow-style title bar over the window's content. */
 export function MosaicPane({
-  id, title, statusColor, linkedNames, focused, maximized,
+  id, agentName, title, statusColor, linkedNames, focused, maximized,
   onFocus, onToggleMaximize, onClose, onHeaderPointerDown, dragging, children
 }: MosaicPaneProps): React.ReactElement {
   const stop = (e: React.SyntheticEvent): void => e.stopPropagation()
   return (
     <div
       data-mosaic-leaf={id}
+      data-agent-name={agentName}
       onPointerDownCapture={onFocus}
       style={{
         ...paneStyle,
