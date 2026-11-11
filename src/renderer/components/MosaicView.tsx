@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { MosaicPane } from './MosaicPane'
-import { renderWindowContent, windowAgent, windowStatusColor, windowTitle } from './window-content'
+import { renderWindowContent, windowAgent, windowHeading } from './window-content'
 import { edgeAt, move, setRatio, type MosaicEdge, type MosaicNode, type MosaicPath } from '../mosaic-tree'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
@@ -93,13 +93,16 @@ export function MosaicView({
   const renderPane = (win: WindowState): React.ReactElement => {
     const agent = windowAgent(win, agents)
     const maximized = win.id === maximizedId
+    const heading = windowHeading(win, agents)
     return (
       <MosaicPane
         key={win.id}
         id={win.id}
         agentName={agent?.name}
-        title={windowTitle(win, agents)}
-        statusColor={windowStatusColor(win, agents)}
+        title={heading.title}
+        spec={heading.spec}
+        status={agent?.status}
+        theme={agent?.theme}
         linkedNames={agent ? linkedAgentNames(agent, agents, links) : []}
         focused={win.id === focusedId}
         maximized={maximized}

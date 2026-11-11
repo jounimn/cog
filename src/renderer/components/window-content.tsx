@@ -41,6 +41,13 @@ export function windowTitle(win: WindowState, agents: AgentState[]): string {
     : win.title
 }
 
+/** The plate header's name and spec line: an agent shows `name · role` over its cli and model; a panel just its title. */
+export function windowHeading(win: WindowState, agents: AgentState[]): { title: string; spec?: string[] } {
+  const agent = windowAgent(win, agents)
+  if (!agent) return { title: win.title }
+  return { title: `${agent.name} · ${agent.role}`, spec: [agent.cli, agent.model].filter((s): s is string => !!s) }
+}
+
 export function windowStatusColor(win: WindowState, agents: AgentState[]): string | undefined {
   const agent = windowAgent(win, agents)
   return agent ? STATUS_COLORS[agent.status] ?? '#888' : undefined

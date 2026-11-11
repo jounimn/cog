@@ -1,11 +1,12 @@
 import React from 'react'
 import type { AgentState } from '../../shared/types'
+import { c, font } from '../ui'
 
 const STATUS_COLORS: Record<string, string> = {
-  idle: '#888',
-  active: '#4caf50',
-  working: '#ffc107',
-  disconnected: '#f44336'
+  idle: c('ink-subtle'),
+  active: c('success'),
+  working: c('working'),
+  disconnected: c('danger')
 }
 
 interface AgentPillProps {
@@ -29,13 +30,13 @@ export function AgentPill({ agent, onClick, groupColor, onLinkDragStart, isLinkT
           alignItems: 'center',
           gap: '6px',
           padding: '4px 12px',
-          backgroundColor: isLinkTarget ? '#2d3a4d' : '#2a2a2a',
-          border: isLinkTarget ? '1px solid #4a9eff' : groupColor ? `1px solid ${groupColor}` : '1px solid #3a3a3a',
+          backgroundColor: isLinkTarget ? c('surface-muted') : c('surface'),
+          border: isLinkTarget ? `1px solid ${c('steel')}` : groupColor ? `1px solid ${groupColor}` : `1px solid ${c('line-strong')}`,
           borderRadius: '16px',
-          color: '#ccc',
+          color: c('ink-muted'),
           cursor: 'pointer',
           fontSize: '12px',
-          fontFamily: 'inherit',
+          fontFamily: font.text,
           transition: 'border-color 0.15s, background-color 0.15s',
         }}
       >
@@ -43,10 +44,10 @@ export function AgentPill({ agent, onClick, groupColor, onLinkDragStart, isLinkT
           width: 8,
           height: 8,
           borderRadius: '50%',
-          backgroundColor: STATUS_COLORS[agent.status] ?? '#888'
+          backgroundColor: STATUS_COLORS[agent.status] ?? c('ink-subtle')
         }} />
         {agent.name}
-        <span style={{ color: '#666', fontSize: '11px' }}>{agent.role}</span>
+        <span style={{ color: c('ink-subtle'), fontSize: '11px' }}>{agent.role}</span>
       </button>
       {onLinkDragStart && (
         <div
@@ -56,8 +57,8 @@ export function AgentPill({ agent, onClick, groupColor, onLinkDragStart, isLinkT
             width: 10,
             height: 10,
             borderRadius: '50%',
-            backgroundColor: groupColor || '#555',
-            border: '2px solid #333',
+            backgroundColor: groupColor || c('ink-subtle'),
+            border: `2px solid ${c('line-strong')}`,
             cursor: 'crosshair',
             flexShrink: 0,
             transition: 'transform 0.15s',

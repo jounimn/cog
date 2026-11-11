@@ -5,11 +5,16 @@ import { getSnapZone, getWindowSnap, type SnapBounds, type SnapZoneInfo, type Wi
 import type { AgentTheme, AgentStatus } from '../../shared/types'
 import { cardPresentation } from '../sleep-ui'
 import { THEME_PRESETS, resolveTheme } from '../themes'
+import { PlateHeader, PlateTicks, plateAccent } from './PlateHeader'
+import { Button, Icon, c, font } from '../ui'
 
 interface FloatingWindowProps {
   id: string
   title: string
-  statusColor?: string
+  /** Agent cli and model, shown under the name. */
+  spec?: string[]
+  /** This is the focused window (the top one). */
+  focused?: boolean
   x: number
   y: number
   width: number
@@ -61,7 +66,8 @@ interface FloatingWindowProps {
 export function FloatingWindow({
   id,
   title,
-  statusColor,
+  spec,
+  focused,
   x,
   y,
   width,
@@ -243,16 +249,35 @@ export function FloatingWindow({
   if (minimized) return null
 
   const presentation = cardPresentation({ status: status ?? 'idle', ...sleepInfo })
-  const themedWindowStyle: React.CSSProperties = {
+  const accent = plateAccent(theme)
+  const frameStyle: React.CSSProperties = {
     ...windowStyle,
     opacity: presentation.opacity,
-    border: `1px solid ${resolvedTheme.border}`,
-    backgroundColor: resolvedTheme.bg
+    border: `1px solid ${accent?.border ?? (focused ? c('steel') : c('line-strong'))}`,
+    backgroundColor: accent ? resolvedTheme.bg : c('surface')
   }
-  const themedTitleBarStyle: React.CSSProperties = {
-    ...titleBarStyle,
-    backgroundColor: resolvedTheme.chrome
-  }
+  const titleText = `${presentation.titlePrefix}${title}`
+  const onTitleDoubleClick = status === 'sleeping' && onWakeAgent && agentId ? () => onWakeAgent(agentId) : onMaximize
+  const header = (isMaximized: boolean): React.ReactElement => (
+    <PlateHeader
+      className="window-titlebar"
+      title={titleText}
+      spec={spec}
+      status={isAgent ? status : undefined}
+      focused={focused}
+      accent={accent}
+      maximized={isMaximized}
+      onMaximize={onMaximize}
+      onClose={onClose}
+      onDoubleClick={onTitleDoubleClick}
+      onContextMenu={openContextMenu}
+      extra={
+        <Button variant="icon" className="cog-btn--ghost" onClick={onMinimize} title="Minimize" aria-label="Minimize">
+          <Icon name="minus" size={14} />
+        </Button>
+      }
+    />
+  )
 
   // Maximized: render via portal into viewport (outside canvas transform)
   if (maximized && viewportRef?.current) {
@@ -260,20 +285,9 @@ export function FloatingWindow({
       <div style={{
         position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
         zIndex: 99998, display: 'flex', flexDirection: 'column',
-        ...themedWindowStyle
+        ...frameStyle, overflow: 'hidden'
       }}>
-        <div
-          className="window-titlebar"
-          style={themedTitleBarStyle}
-          onDoubleClick={status === 'sleeping' && onWakeAgent && agentId ? () => onWakeAgent(agentId) : onMaximize}
-          onContextMenu={openContextMenu}
-        >
-          {statusColor && <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: statusColor, marginRight: 8 }} />}
-          <span style={{ flex: 1, fontSize: '12px', color: '#ccc' }}>{presentation.titlePrefix}{title}</span>
-          <button onMouseDown={e => e.stopPropagation()} onClick={onMinimize} style={btnStyle}>─</button>
-          <button onMouseDown={e => e.stopPropagation()} onClick={onMaximize} style={btnStyle}>❐</button>
-          <button onMouseDown={e => e.stopPropagation()} onClick={onClose} style={{ ...btnStyle, color: '#e55' }}>✕</button>
-        </div>
+        {header(true)}
         <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>
         {themeMenu && <ThemeMenu x={themeMenu.x} y={themeMenu.y} theme={theme} onClose={() => setThemeMenu(null)} onApplyPreset={applyPreset} onChangeField={updateThemeField} onEdit={onEditAgent && agentId ? () => onEditAgent(agentId) : undefined} menu={presentation.menu} onSleep={onSleepAgent && agentId ? () => onSleepAgent(agentId) : undefined} onWake={onWakeAgent && agentId ? () => onWakeAgent(agentId) : undefined} />}
         {customMenu}
@@ -286,7 +300,7 @@ export function FloatingWindow({
     <Rnd
       position={{ x, y }}
       size={{ width: displayWidth, height: displayHeight }}
-      style={{ ...themedWindowStyle, zIndex }}
+      style={{ ...frameStyle, zIndex }}
       dragHandleClassName="window-titlebar"
       minWidth={300}
       minHeight={200}
@@ -297,19 +311,8 @@ export function FloatingWindow({
       onDragStop={handleDragStop}
       onResizeStop={handleResizeStop}
     >
-      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-        <div
-          className="window-titlebar"
-          style={themedTitleBarStyle}
-          onDoubleClick={status === 'sleeping' && onWakeAgent && agentId ? () => onWakeAgent(agentId) : onMaximize}
-          onContextMenu={openContextMenu}
-        >
-          {statusColor && <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: statusColor, marginRight: 8 }} />}
-          <span style={{ flex: 1, fontSize: '12px', color: '#ccc' }}>{presentation.titlePrefix}{title}</span>
-          <button onMouseDown={e => e.stopPropagation()} onClick={onMinimize} style={btnStyle}>─</button>
-          <button onMouseDown={e => e.stopPropagation()} onClick={onMaximize} style={btnStyle}>□</button>
-          <button onMouseDown={e => e.stopPropagation()} onClick={onClose} style={{ ...btnStyle, color: '#e55' }}>✕</button>
-        </div>
+      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', borderRadius: 'var(--r)' }}>
+        {header(false)}
         {isAgent && onLinkDragStart && (
           <div
             onMouseDown={(e) => { e.stopPropagation(); onLinkDragStart(e) }}
@@ -321,8 +324,8 @@ export function FloatingWindow({
               width: 12,
               height: 12,
               borderRadius: '50%',
-              backgroundColor: groupColor || '#666',
-              border: '2px solid #444',
+              backgroundColor: groupColor || c('ink-subtle'),
+              border: `2px solid ${c('line-strong')}`,
               cursor: 'crosshair',
               zIndex: 10,
               transition: 'transform 0.15s',
@@ -333,6 +336,7 @@ export function FloatingWindow({
         )}
         <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>
       </div>
+      {focused && <PlateTicks />}
       {themeMenu && <ThemeMenu x={themeMenu.x} y={themeMenu.y} theme={theme} onClose={() => setThemeMenu(null)} onApplyPreset={applyPreset} onChangeField={updateThemeField} onEdit={onEditAgent && agentId ? () => onEditAgent(agentId) : undefined} menu={presentation.menu} onSleep={onSleepAgent && agentId ? () => onSleepAgent(agentId) : undefined} onWake={onWakeAgent && agentId ? () => onWakeAgent(agentId) : undefined} />}
       {customMenu}
     </Rnd>
@@ -366,11 +370,11 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit,
       <div onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose() }} style={{ position: 'fixed', inset: 0, zIndex: 100000 }} />
       <div style={{
         position: 'fixed', left: x, top: y, zIndex: 100001,
-        backgroundColor: '#1a1a1a', border: '1px solid #444', borderRadius: '6px',
-        padding: '8px', minWidth: '220px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-        fontFamily: 'monospace', color: '#ccc'
+        backgroundColor: c('surface'), border: `1px solid ${c('line-strong')}`, borderRadius: 'var(--r)',
+        padding: '8px', minWidth: '220px', boxShadow: `0 8px 24px ${c('surface-sunk', 0.6)}`,
+        fontFamily: font.text, color: c('ink-muted')
       }}>
-        <div style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', marginBottom: '6px', padding: '0 4px' }}>
+        <div style={{ fontSize: '10px', color: c('ink-subtle'), textTransform: 'uppercase', marginBottom: '6px', padding: '0 4px' }}>
           Quick Themes
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '4px', marginBottom: '8px' }}>
@@ -393,14 +397,14 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit,
           ))}
         </div>
 
-        <div style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', marginBottom: '6px', padding: '0 4px' }}>
+        <div style={{ fontSize: '10px', color: c('ink-subtle'), textTransform: 'uppercase', marginBottom: '6px', padding: '0 4px' }}>
           Custom Colors
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
           {fields.map(f => (
             <label key={f.key} style={{
               display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px',
-              padding: '4px 6px', backgroundColor: '#222', borderRadius: '3px'
+              padding: '4px 6px', backgroundColor: c('surface-muted'), borderRadius: 'var(--r)'
             }}>
               <input
                 type="color"
@@ -409,7 +413,7 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit,
                 style={{ width: '24px', height: '20px', border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
               />
               <span style={{ flex: 1 }}>{f.label}</span>
-              <span style={{ color: '#666', fontSize: '10px' }}>{resolved[f.key]}</span>
+              <span style={{ color: c('ink-subtle'), fontSize: '10px', fontFamily: font.mono }}>{resolved[f.key]}</span>
             </label>
           ))}
         </div>
@@ -418,19 +422,19 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit,
           onClick={() => onApplyPreset(null)}
           style={{
             width: '100%', padding: '6px', fontSize: '11px',
-            background: 'transparent', border: '1px solid #444', borderRadius: '4px',
-            color: '#888', cursor: 'pointer', fontFamily: 'monospace'
+            background: 'transparent', border: `1px solid ${c('line-strong')}`, borderRadius: 'var(--r)',
+            color: c('ink-subtle'), cursor: 'pointer', fontFamily: font.text
           }}
         >Reset to Default</button>
         {onEdit && (
           <>
-            <div style={{ borderTop: '1px solid #333', margin: '8px 0' }} />
+            <div style={{ borderTop: `1px solid ${c('line')}`, margin: '8px 0' }} />
             <button
               onClick={() => { onEdit(); onClose() }}
               style={{
                 width: '100%', padding: '6px', fontSize: '11px',
-                background: 'transparent', border: '1px solid #444', borderRadius: '4px',
-                color: '#aaa', cursor: 'pointer', fontFamily: 'monospace'
+                background: 'transparent', border: `1px solid ${c('line-strong')}`, borderRadius: 'var(--r)',
+                color: c('ink-muted'), cursor: 'pointer', fontFamily: font.text
               }}
             >Edit agent…</button>
           </>
@@ -440,8 +444,8 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit,
             onClick={() => { onSleep(); onClose() }}
             style={{
               width: '100%', padding: '6px', fontSize: '11px', marginTop: '8px',
-              background: 'transparent', border: '1px solid #444', borderRadius: '4px',
-              color: '#aaa', cursor: 'pointer', fontFamily: 'monospace'
+              background: 'transparent', border: `1px solid ${c('line-strong')}`, borderRadius: 'var(--r)',
+              color: c('ink-muted'), cursor: 'pointer', fontFamily: font.text
             }}
           >Sleep now</button>
         )}
@@ -450,8 +454,8 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit,
             onClick={() => { onWake(); onClose() }}
             style={{
               width: '100%', padding: '6px', fontSize: '11px', marginTop: '8px',
-              background: 'transparent', border: '1px solid #444', borderRadius: '4px',
-              color: '#aaa', cursor: 'pointer', fontFamily: 'monospace'
+              background: 'transparent', border: `1px solid ${c('line-strong')}`, borderRadius: 'var(--r)',
+              color: c('ink-muted'), cursor: 'pointer', fontFamily: font.text
             }}
           >Wake</button>
         )}
@@ -462,30 +466,6 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit,
 }
 
 const windowStyle: React.CSSProperties = {
-  border: '1px solid #333',
-  borderRadius: '6px',
-  overflow: 'hidden',
-  backgroundColor: '#0d0d0d',
-  boxShadow: '0 4px 20px rgba(0,0,0,0.5)'
-}
-
-const titleBarStyle: React.CSSProperties = {
-  height: '32px',
-  backgroundColor: '#1e1e1e',
-  display: 'flex',
-  alignItems: 'center',
-  padding: '0 10px',
-  cursor: 'grab',
-  userSelect: 'none',
-  flexShrink: 0
-}
-
-const btnStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: '#888',
-  cursor: 'pointer',
-  padding: '0 6px',
-  fontSize: '14px',
-  lineHeight: '32px'
+  borderRadius: 'var(--r)',
+  boxShadow: `0 4px 20px ${c('surface-sunk', 0.5)}`
 }
