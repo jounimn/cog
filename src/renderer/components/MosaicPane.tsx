@@ -13,13 +13,15 @@ export interface MosaicPaneProps {
   onClose(): void
   /** Header drag start (used to move panes between splits). */
   onHeaderPointerDown?(e: React.PointerEvent): void
+  /** This pane is being dragged: its header is dimmed. */
+  dragging?: boolean
   children: React.ReactNode
 }
 
 /** One tile of the Mosaic view: a FloatingWindow-style title bar over the window's content. */
 export function MosaicPane({
   id, title, statusColor, linkedNames, focused, maximized,
-  onFocus, onToggleMaximize, onClose, onHeaderPointerDown, children
+  onFocus, onToggleMaximize, onClose, onHeaderPointerDown, dragging, children
 }: MosaicPaneProps): React.ReactElement {
   const stop = (e: React.SyntheticEvent): void => e.stopPropagation()
   return (
@@ -31,7 +33,7 @@ export function MosaicPane({
         border: `1px solid ${focused ? FOCUS_COLOR : '#333'}`
       }}
     >
-      <div style={headerStyle} onDoubleClick={onToggleMaximize} onPointerDown={onHeaderPointerDown}>
+      <div style={dragging ? { ...headerStyle, opacity: 0.5 } : headerStyle} onDoubleClick={onToggleMaximize} onPointerDown={onHeaderPointerDown}>
         {statusColor && <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: statusColor, marginRight: 8, flexShrink: 0 }} />}
         <span style={titleStyle}>{title}</span>
         {linkedNames.length > 0 && (

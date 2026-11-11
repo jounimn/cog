@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { MosaicPane } from './MosaicPane'
 import { renderWindowContent, windowAgent, windowStatusColor, windowTitle } from './window-content'
-import { setRatio, type MosaicNode, type MosaicPath } from '../mosaic-tree'
+import { edgeAt, move, setRatio, type MosaicEdge, type MosaicNode, type MosaicPath } from '../mosaic-tree'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 
@@ -22,6 +22,22 @@ export interface MosaicViewProps {
 }
 
 const DIVIDER = 4
+/** Pointer travel before a header press becomes a drag, so click and double-click keep working. */
+const DRAG_THRESHOLD = 4
+
+interface DropTarget { targetId: string; edge: MosaicEdge; rect: { left: number; top: number; width: number; height: number } }
+
+/** The part of `rect` a drop on `edge` would claim: the half on that side, or all of it for `center`. */
+function previewRect(rect: DropTarget['rect'], edge: MosaicEdge): DropTarget['rect'] {
+  const { left, top, width, height } = rect
+  switch (edge) {
+    case 'left': return { left, top, width: width / 2, height }
+    case 'right': return { left: left + width / 2, top, width: width / 2, height }
+    case 'top': return { left, top, width, height: height / 2 }
+    case 'bottom': return { left, top: top + height / 2, width, height: height / 2 }
+    default: return rect
+  }
+}
 
 /** Names of the agents linked to `agent`. Links are keyed by agent name (as in LinkOverlay); ids are accepted too. */
 function linkedAgentNames(agent: AgentState, agents: AgentState[], links: Array<{ from: string; to: string }>): string[] {
@@ -49,6 +65,12 @@ export function MosaicView({
   // Latest tree for divider drags, which fire faster than re-renders.
   const treeRef = useRef(shownTree)
   useLayoutEffect(() => { treeRef.current = shownTree })
+
+  // Header drag: which pane is being dragged and where it would land.
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null)
+  const paneDragCleanup = useRef<(() => void) | null>(null)
+  useEffect(() => () => paneDragCleanup.current?.(), [])
 
   const maximizedWin = maximizedId ? windows.find(w => w.id === maximizedId) : undefined
 
@@ -83,10 +105,83 @@ export function MosaicView({
         onFocus={() => { if (win.id !== focusedId) onFocus(win.id) }}
         onToggleMaximize={() => onMaximize(maximized ? null : win.id)}
         onClose={() => onClose(win.id)}
+        onHeaderPointerDown={maximized || maximizedWin ? undefined : e => startPaneDrag(e, win.id)}
+        dragging={win.id === draggingId}
       >
         {renderWindowContent(win, { agents, tabs, activeTabId })}
       </MosaicPane>
     )
+  }
+
+  const startPaneDrag = (e: React.PointerEvent, id: string): void => {
+    if (e.button !== 0 || paneDragCleanup.current) return
+    const header = e.currentTarget as HTMLElement
+    const pointerId = e.pointerId
+    const startX = e.clientX
+    const startY = e.clientY
+    let active = false
+    let target: DropTarget | null = null
+    try { header.setPointerCapture(pointerId) } catch { /* pointer already gone */ }
+
+    const onMove = (ev: PointerEvent): void => {
+      if (!active) {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) <= DRAG_THRESHOLD) return
+        active = true
+        setDraggingId(id)
+      }
+      const leaf = document.elementFromPoint(ev.clientX, ev.clientY)?.closest<HTMLElement>('[data-mosaic-leaf]')
+      const targetId = leaf?.dataset.mosaicLeaf
+      let next: DropTarget | null = null
+      if (leaf && targetId && targetId !== id) {
+        const r = leaf.getBoundingClientRect()
+        // A zero-size pane has no meaningful edge (edgeAt would divide by zero).
+        if (r.width > 0 && r.height > 0) {
+          next = {
+            targetId,
+            edge: edgeAt(ev.clientX - r.left, ev.clientY - r.top, r.width, r.height),
+            rect: { left: r.left, top: r.top, width: r.width, height: r.height }
+          }
+        }
+      }
+      if (next?.targetId === target?.targetId && next?.edge === target?.edge) return
+      target = next
+      setDropTarget(next)
+    }
+    const finish = (drop: boolean): void => {
+      paneDragCleanup.current = null
+      try { if (header.hasPointerCapture(pointerId)) header.releasePointerCapture(pointerId) } catch { /* detached */ }
+      header.removeEventListener('pointermove', onMove)
+      header.removeEventListener('pointerup', onUp)
+      header.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('keydown', onKey, true)
+      setDraggingId(null)
+      setDropTarget(null)
+      const current = treeRef.current
+      if (drop && active && target && current) {
+        const next = move(current, id, target.targetId, target.edge)
+        if (next !== current) onTreeChange(next)
+      }
+    }
+    const onUp = (): void => finish(true)
+    const onCancel = (): void => finish(false)
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key !== 'Escape') return
+      // Escape only cancels the drag; nothing else sees it.
+      ev.preventDefault()
+      ev.stopPropagation()
+      finish(false)
+    }
+    header.addEventListener('pointermove', onMove)
+    header.addEventListener('pointerup', onUp)
+    header.addEventListener('pointercancel', onCancel)
+    window.addEventListener('keydown', onKey, true)
+    paneDragCleanup.current = () => {
+      paneDragCleanup.current = null
+      header.removeEventListener('pointermove', onMove)
+      header.removeEventListener('pointerup', onUp)
+      header.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('keydown', onKey, true)
+    }
   }
 
   const startDividerDrag = (e: React.PointerEvent<HTMLDivElement>, path: MosaicPath, dir: 'row' | 'col'): void => {
@@ -166,6 +261,18 @@ export function MosaicView({
       ) : shownTree ? (
         renderNode(shownTree, [])
       ) : null}
+      {dropTarget && (() => {
+        const p = previewRect(dropTarget.rect, dropTarget.edge)
+        return (
+          <div style={{
+            position: 'fixed', left: p.left, top: p.top, width: p.width, height: p.height,
+            background: 'rgba(70, 130, 255, 0.18)',
+            border: '1px solid rgba(120, 170, 255, 0.75)',
+            boxShadow: 'inset 0 0 0 1px rgba(180, 210, 255, 0.35)',
+            pointerEvents: 'none', zIndex: 99997
+          }} />
+        )
+      })()}
     </div>
   )
 }
