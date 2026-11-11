@@ -7,12 +7,17 @@ import { CanvasGround } from './CanvasGround'
 import { Rulers } from './Rulers'
 import { c } from '../ui/tokens'
 import { ZoomControls } from './ZoomControls'
+import { Minimap } from './Minimap'
+import { visibleRange } from '../ruler'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import type { SnapBounds, SnapZoneInfo, WindowBounds } from '../hooks/useSnapZones'
 import { clientToCanvas } from '../canvas-math'
 import { getPanelType } from '../panel-ids'
 import { renderWindowContent, windowAgent, windowHeading } from './window-content'
+
+/** Layout colour sent to remote clients, which have no CSS tokens; equals --ink-subtle. */
+const REMOTE_FALLBACK_COLOR = 'rgb(136 152 174)'
 
 interface WorkspaceProps {
   windows: WindowState[]
@@ -136,7 +141,7 @@ export function Workspace({
           y: w.y,
           width: w.width,
           height: w.height,
-          color: agent?.theme?.chrome ?? group?.color ?? '#888888'
+          color: agent?.theme?.chrome ?? group?.color ?? REMOTE_FALLBACK_COLOR
         }
       })
       window.electronAPI.syncWorkshopLayout(layouts)
@@ -466,10 +471,24 @@ export function Workspace({
       {/* Zoom controls — outside canvas transform */}
       <ZoomControls
         zoom={zoom}
+        range={visibleRange(zoom, pan, workspaceSize.width, workspaceSize.height)}
         onZoomIn={() => onSetZoom(Math.min(2.0, zoom + 0.1))}
         onZoomOut={() => onSetZoom(Math.max(0.25, zoom - 0.1))}
         onReset={handleReset}
         onFitAll={handleFitAll}
+      />
+
+      <Minimap
+        windows={windows}
+        links={links}
+        agents={agents}
+        focusedWindowId={focusedWindowId}
+        zoom={zoom}
+        pan={pan}
+        viewportWidth={workspaceSize.width}
+        viewportHeight={workspaceSize.height}
+        sheetName={tabs.find(t => t.id === activeTabId)?.name ?? 'Workspace'}
+        onSetPan={onSetPan}
       />
     </div>
   )
