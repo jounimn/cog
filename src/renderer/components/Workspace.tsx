@@ -3,6 +3,9 @@ import { FloatingWindow } from './FloatingWindow'
 import { LinkOverlay } from './LinkOverlay'
 import { SnapPreview } from './SnapPreview'
 import { TrollboxThemeMenu } from './trollbox/TrollboxThemeMenu'
+import { CanvasGround } from './CanvasGround'
+import { Rulers } from './Rulers'
+import { c } from '../ui/tokens'
 import { ZoomControls } from './ZoomControls'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
@@ -348,7 +351,7 @@ export function Workspace({
         flex: 1,
         position: 'relative',
         overflow: 'hidden',
-        backgroundColor: '#111',
+        backgroundColor: c('canvas'),
         cursor: isPanning ? 'grabbing' : 'default'
       }}
       onMouseDown={handleMouseDown}
@@ -356,6 +359,8 @@ export function Workspace({
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
+      <CanvasGround zoom={zoom} pan={pan} width={workspaceSize.width} height={workspaceSize.height} />
+
       {/* Canvas — transformed by zoom/pan */}
       <div
         data-canvas
@@ -450,6 +455,8 @@ export function Workspace({
           )
         })}
       </div>
+
+      <Rulers zoom={zoom} pan={pan} width={workspaceSize.width} height={workspaceSize.height} />
 
       <SnapPreview bounds={snapPreview?.bounds ?? null} />
 
