@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { AgentTheme } from '../../shared/types'
 import { resolveTheme } from '../themes'
 import { createTerminalRegistry } from '../terminal-registry'
+import { debounce } from '../debounce'
 
 interface TerminalWindowProps {
   agentId: string
@@ -121,11 +122,20 @@ export function TerminalWindow({ agentId, theme }: TerminalWindowProps): React.R
     // the whole screen from its own buffer now that it is visible again.
     term.refresh(0, Math.max(0, term.rows - 1))
 
-    const observer = new ResizeObserver(syncSize)
+    // Visual fit stays live; the PTY resize (SIGWINCH to the CLI) is debounced.
+    const pushPtySize = debounce(
+      () => window.electronAPI.resizePty(agentId, term.cols, term.rows),
+      150
+    )
+    const observer = new ResizeObserver(() => {
+      fit.fit()
+      pushPtySize()
+    })
     observer.observe(container)
 
     return () => {
       observer.disconnect()
+      pushPtySize.cancel()
       // Detach only — the terminal keeps running (and buffering PTY output)
       // until App disposes it when the agent's window goes away.
       if (element.parentNode === container) container.removeChild(element)
