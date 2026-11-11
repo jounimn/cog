@@ -5,6 +5,7 @@ import '@xterm/xterm/css/xterm.css'
 import type { AgentTheme } from '../../shared/types'
 import { resolveTheme } from '../themes'
 import { createTerminalRegistry } from '../terminal-registry'
+import { debounce } from '../debounce'
 
 interface TerminalWindowProps {
   agentId: string
@@ -58,6 +59,8 @@ function createTerminal(agentId: string): TerminalHandle {
   // Ctrl+C: copy if text selected, otherwise send SIGINT to PTY
   // Ctrl+V: paste from clipboard into PTY
   term.attachCustomKeyEventHandler((ev) => {
+    // Ctrl+Shift+M toggles Canvas/Mosaic (window listener); don't send it to the PTY as Ctrl+M (CR).
+    if (ev.ctrlKey && ev.shiftKey && ev.key.toLowerCase() === 'm') return false
     if (ev.ctrlKey && ev.key === 'c' && ev.type === 'keydown') {
       if (term.hasSelection()) {
         navigator.clipboard.writeText(term.getSelection())
@@ -101,6 +104,11 @@ function createTerminal(agentId: string): TerminalHandle {
 
 export const terminalRegistry = createTerminalRegistry<TerminalHandle>(createTerminal)
 
+/** Give keyboard focus to the agent's terminal, if it has one (never creates it). */
+export function focusTerminal(agentId: string): void {
+  if (terminalRegistry.has(agentId)) terminalRegistry.acquire(agentId).term.focus()
+}
+
 export function TerminalWindow({ agentId, theme }: TerminalWindowProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -121,11 +129,20 @@ export function TerminalWindow({ agentId, theme }: TerminalWindowProps): React.R
     // the whole screen from its own buffer now that it is visible again.
     term.refresh(0, Math.max(0, term.rows - 1))
 
-    const observer = new ResizeObserver(syncSize)
+    // Visual fit stays live; the PTY resize (SIGWINCH to the CLI) is debounced.
+    const pushPtySize = debounce(
+      () => window.electronAPI.resizePty(agentId, term.cols, term.rows),
+      150
+    )
+    const observer = new ResizeObserver(() => {
+      fit.fit()
+      pushPtySize()
+    })
     observer.observe(container)
 
     return () => {
       observer.disconnect()
+      pushPtySize.cancel()
       // Detach only — the terminal keeps running (and buffering PTY output)
       // until App disposes it when the agent's window goes away.
       if (element.parentNode === container) container.removeChild(element)

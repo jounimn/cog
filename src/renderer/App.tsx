@@ -1,6 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react'
 import { TopBar } from './components/TopBar'
 import { Workspace } from './components/Workspace'
+import { MosaicView } from './components/MosaicView'
+import { useMosaicState } from './hooks/useMosaicState'
+import { mosaicStore } from './mosaic-store'
+import { leafIds } from './mosaic-tree'
 import { SpawnDialog } from './components/SpawnDialog'
 import { PresetDialog } from './components/PresetDialog'
 import { BugReportDialog } from './components/BugReportDialog'
@@ -10,7 +14,7 @@ import { ProjectPickerDialog } from './components/ProjectPickerDialog'
 import { useWindowManager } from './hooks/useWindowManager'
 import { loadWindowBounds, saveWindowBounds, deleteWindowBounds } from './window-layout'
 import { viewportStore } from './viewport-store'
-import { terminalRegistry } from './components/TerminalWindow'
+import { focusTerminal, terminalRegistry } from './components/TerminalWindow'
 import { useAgents } from './hooks/useAgents'
 import { killConfirmText } from './killed-agents'
 import { UpdateNotice } from './components/UpdateNotice'
@@ -104,6 +108,51 @@ export function App(): React.ReactElement {
   // Filter windows to only those belonging to the active tab
   const tabWindows = windows.filter(w => w.tabId === activeTabId)
 
+  // Per-tab Mosaic view (tiled alternative to the canvas).
+  const { mosaic, tree: mosaicTree, maximizedId: mosaicMaximizedId, updateMosaic, focusedPaneId, setFocusedPaneId } =
+    useMosaicState(activeTabId, tabWindows.map(w => w.id))
+  const toggleViewMode = useCallback(() => {
+    updateMosaic({ mode: mosaic.mode === 'mosaic' ? 'canvas' : 'mosaic' })
+  }, [updateMosaic, mosaic.mode])
+
+  // The one way to focus a Mosaic pane (click, shortcuts, pills, panels; see focusInView): highlight
+  // it and give its terminal the keyboard. Never focusWindow, which is canvas
+  // state (un-minimizes, raises zIndex). The terminal is focused on the next
+  // frame, after a header press has finished moving focus to the page.
+  const focusPane = useCallback((id: string) => {
+    setFocusedPaneId(id)
+    requestAnimationFrame(() => focusTerminal(id))
+  }, [setFocusedPaneId])
+
+  // Focus a window in whichever view is showing: canvas raises/un-minimizes it
+  // (focusWindow); Mosaic focuses its pane and leaves canvas state alone. While
+  // a pane is maximized the others are hidden, so going to another of the
+  // tab's panes makes it the maximized one.
+  const focusInView = useCallback((id: string) => {
+    if (mosaic.mode !== 'mosaic') { focusWindow(id); return }
+    if (mosaicMaximizedId !== null && id !== mosaicMaximizedId && leafIds(mosaicTree).includes(id)) {
+      updateMosaic({ maximizedId: id })
+    }
+    focusPane(id)
+  }, [mosaic.mode, mosaicMaximizedId, mosaicTree, focusWindow, updateMosaic, focusPane])
+
+  // Panes remount when the tree changes shape, a pane is (un)maximized or the
+  // view switches to Mosaic, and the remounted terminal has lost the keyboard:
+  // give it back to the focused pane, unless the user is typing in a field.
+  const focusedPaneRef = React.useRef(focusedPaneId)
+  focusedPaneRef.current = focusedPaneId
+  useEffect(() => {
+    if (mosaic.mode !== 'mosaic') return
+    const raf = requestAnimationFrame(() => {
+      const id = focusedPaneRef.current
+      const active = document.activeElement
+      const typing = active instanceof HTMLElement && !active.closest('.xterm') &&
+        (active.matches('input, textarea, select') || active.isContentEditable)
+      if (id && !typing) focusTerminal(id)
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [mosaic.mode, mosaicTree, mosaicMaximizedId])
+
   // ── Per-tab viewport ───────────────────────────────────────────────────────
   // Each tab lays its windows out in its own region of the canvas, so the view
   // must follow the tab: restore the remembered viewport on switch, or fit the
@@ -120,6 +169,7 @@ export function App(): React.ReactElement {
       setAutoFitTab(null)
     } else {
       setAutoFitTab(activeTabId)
+      setFitRequest(0) // a request left over from another tab must not fire here
     }
     return () => {
       // Leaving this tab: remember where it was left.
@@ -262,6 +312,7 @@ export function App(): React.ReactElement {
     if (tabs.length <= 1) return
     await window.electronAPI.closeTab(tabId)
     viewportStore.remove(tabId)
+    mosaicStore.remove(tabId)
     setTabs(prev => prev.filter(t => t.id !== tabId))
     if (activeTabId === tabId) {
       const remaining = tabs.filter(t => t.id !== tabId)
@@ -308,8 +359,8 @@ export function App(): React.ReactElement {
   }, [killAgent, removeWindow, agents])
 
   const handleAgentPillClick = useCallback((agentId: string) => {
-    focusWindow(agentId)
-  }, [focusWindow])
+    focusInView(agentId)
+  }, [focusInView])
 
   const handleClearContext = useCallback(async (agentId: string) => {
     await window.electronAPI.clearAgentContext(agentId)
@@ -519,37 +570,59 @@ export function App(): React.ReactElement {
   // Keyboard shortcuts: Ctrl+1..9 to focus windows, Ctrl+Tab to cycle
   useEffect(() => {
     let currentFocusIdx = 0
+    const inMosaic = mosaic.mode === 'mosaic'
     const handler = (e: KeyboardEvent) => {
+      // Ctrl+Shift+M = toggle Canvas / Mosaic (once per press, not per auto-repeat)
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'm') {
+        if (!e.repeat) toggleViewMode()
+        e.preventDefault()
+        return
+      }
+      // Mosaic panes in on-screen order (Ctrl+1..9 and Ctrl+Tab). While one is
+      // maximized the others are not shown, so these switch the maximized pane
+      // (focusInView).
+      const paneIds = inMosaic ? leafIds(mosaicTree) : []
       if (e.ctrlKey && e.key >= '1' && e.key <= '9') {
         const idx = parseInt(e.key) - 1
-        if (tabWindows[idx]) {
+        if (inMosaic) {
+          if (paneIds[idx]) focusInView(paneIds[idx])
+        } else if (tabWindows[idx]) {
           focusWindow(tabWindows[idx].id)
           currentFocusIdx = idx
         }
         e.preventDefault()
       }
       if (e.ctrlKey && e.key === 'Tab') {
-        if (tabWindows.length > 0) {
+        if (inMosaic) {
+          // Cycle panes in tree order, starting after the focused one (the
+          // maximized one while a pane is maximized).
+          if (paneIds.length > 0) {
+            const from = mosaicMaximizedId ?? focusedPaneId ?? ''
+            focusInView(paneIds[(paneIds.indexOf(from) + 1) % paneIds.length])
+          }
+        } else if (tabWindows.length > 0) {
           currentFocusIdx = (currentFocusIdx + 1) % tabWindows.length
           focusWindow(tabWindows[currentFocusIdx].id)
         }
         e.preventDefault()
       }
-      // Ctrl+0 = reset zoom
-      if (e.ctrlKey && e.key === '0' && !e.shiftKey) {
-        userSetZoom(1.0)
-        userSetPan(0, 0)
-        e.preventDefault()
-      }
-      // Ctrl+Shift+0 = fit all
-      if (e.ctrlKey && e.key === ')') {
-        zoomToFit(window.innerWidth, window.innerHeight - 44, activeTabId)
-        e.preventDefault()
+      if (!inMosaic) {
+        // Ctrl+0 = reset zoom
+        if (e.ctrlKey && e.key === '0' && !e.shiftKey) {
+          userSetZoom(1.0)
+          userSetPan(0, 0)
+          e.preventDefault()
+        }
+        // Ctrl+Shift+0 = fit all
+        if (e.ctrlKey && e.key === ')') {
+          zoomToFit(window.innerWidth, window.innerHeight - 44, activeTabId)
+          e.preventDefault()
+        }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [tabWindows, focusWindow, userSetZoom, userSetPan, zoomToFit, activeTabId])
+  }, [tabWindows, focusWindow, focusInView, userSetZoom, userSetPan, zoomToFit, activeTabId, mosaic, mosaicTree, mosaicMaximizedId, focusedPaneId, toggleViewMode])
 
   useEffect(() => {
     electronAPI.getProject().then((p: RecentProject | null) => {
@@ -651,7 +724,7 @@ export function App(): React.ReactElement {
       }
       if (action === 'open' || (action === 'toggle' && !isOpen)) {
         if (isOpen) {
-          focusWindow(id)
+          focusInView(id)
         } else {
           addWindow(id, titleByType[type], undefined, activeTabId)
         }
@@ -660,7 +733,7 @@ export function App(): React.ReactElement {
       }
     })
     return cleanup
-  }, [windows, activeTabId, addWindow, removeWindow, focusWindow])
+  }, [windows, activeTabId, addWindow, removeWindow, focusInView])
 
   // Clear editingAgentId if the agent disappears (killed externally)
   useEffect(() => {
@@ -685,13 +758,13 @@ export function App(): React.ReactElement {
         const title = panel === 'inbox' ? 'Inbox' : panel === 'trollbox' ? 'Trollbox' : 'Pinboard'
         addWindow(id, title, undefined, activeTabId)
       }
-      focusWindow(id)
+      focusInView(id)
     })
     const unsubFocus = window.electronAPI.onStreamDeckFocusAgent((name) => {
       // Agent windows are keyed by agent.id, but the bridge sends agent.name.
       // Find the agent in the registry → focus its window by id.
       const agent = agents.find(a => a.name === name)
-      if (agent?.id) focusWindow(agent.id)
+      if (agent?.id) focusInView(agent.id)
     })
     const unsubRead = window.electronAPI.onStreamDeckMarkRead((kind) => {
       // Mark-read for inbox/trollbox. The renderer doesn't currently track unread
@@ -709,7 +782,7 @@ export function App(): React.ReactElement {
       unsubRead()
       unsubToast()
     }
-  }, [agents, tabWindows, activeTabId, addWindow, focusWindow])
+  }, [agents, tabWindows, activeTabId, addWindow, focusInView])
 
   const handleProjectOpened = useCallback((p: RecentProject) => {
     setProject(p)
@@ -769,7 +842,26 @@ export function App(): React.ReactElement {
             onRenameTab={handleRenameTab}
             boardOpen={boardOpen}
             onToggleBoard={toggleBoard}
+            viewMode={mosaic.mode}
+            onToggleViewMode={toggleViewMode}
           />
+          {mosaic.mode === 'mosaic' ? (
+          <MosaicView
+            windows={tabWindows}
+            agents={tabAgents}
+            tabs={tabs}
+            activeTabId={activeTabId}
+            links={links}
+            tree={mosaicTree}
+            maximizedId={mosaicMaximizedId}
+            focusedId={focusedPaneId}
+            onTreeChange={tree => updateMosaic({ tree })}
+            onMaximize={id => updateMosaic({ maximizedId: id })}
+            onFocus={focusPane}
+            onClose={handleClose}
+            onSpawnClick={() => setShowSpawnDialog(true)}
+          />
+          ) : (
           <Workspace
             windows={tabWindows}
             agents={tabAgents}
@@ -784,7 +876,9 @@ export function App(): React.ReactElement {
             onSetPan={userSetPan}
             onZoomToFit={(w, h) => zoomToFit(w, h, activeTabId)}
             onViewportResize={setViewportSize}
-            fitRequest={fitRequest}
+            // Only while the tab still wants auto-fit: Workspace remounts when
+            // leaving Mosaic and must not replay a stale request on mount.
+            fitRequest={autoFitTab === activeTabId ? fitRequest : 0}
             onFocusWindow={focusWindow}
             onMinimizeWindow={minimizeWindow}
             onCloseWindow={handleClose}
@@ -798,6 +892,7 @@ export function App(): React.ReactElement {
             onSleepAgent={(id) => runSleepAction('sleep', id)}
             onWakeAgent={(id) => runSleepAction('wake', id)}
           />
+          )}
           {showSpawnDialog && (
             <SpawnDialog
               onSpawn={handleSpawn}

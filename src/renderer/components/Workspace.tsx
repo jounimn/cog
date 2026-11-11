@@ -2,56 +2,14 @@ import React, { useRef, useCallback, useState, useEffect } from 'react'
 import { FloatingWindow } from './FloatingWindow'
 import { LinkOverlay } from './LinkOverlay'
 import { SnapPreview } from './SnapPreview'
-import { TerminalWindow } from './TerminalWindow'
-import { PinboardPanel } from './PinboardPanel'
-import { InfoChannelPanel } from './InfoChannelPanel'
-import { FilePanel } from './FilePanel'
-import { RacPanel } from './RacPanel'
-import { UsagePanel } from './UsagePanel'
-import { GitPanel } from './GitPanel'
-import { SchedulesPanel } from './SchedulesPanel'
-import { TrollboxPanel } from './TrollboxPanel'
-import { InboxPanel } from './InboxPanel'
-import { Workboard } from './Workboard'
 import { TrollboxThemeMenu } from './trollbox/TrollboxThemeMenu'
-import { RacAgentChat } from './RacAgentChat'
 import { ZoomControls } from './ZoomControls'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import type { SnapBounds, SnapZoneInfo, WindowBounds } from '../hooks/useSnapZones'
 import { clientToCanvas } from '../canvas-math'
-
-const PANEL_IDS: Record<string, string> = {
-  '__pinboard__': 'pinboard',
-  '__info__': 'info',
-  '__files__': 'files',
-  '__rac__': 'rac',
-  '__usage__': 'usage',
-  '__git__': 'git',
-  '__schedules__': 'schedules',
-  '__trollbox__': 'trollbox',
-  '__inbox__': 'inbox',
-  '__board__': 'board',
-}
-
-// Extract panel type from a potentially tab-qualified ID (e.g. '__pinboard__::tab-1')
-function getPanelType(id: string): string | undefined {
-  for (const [prefix, type] of Object.entries(PANEL_IDS)) {
-    if (id === prefix || id.startsWith(prefix + '::')) {
-      return type
-    }
-  }
-  return undefined
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  idle: '#888',
-  active: '#4caf50',
-  working: '#ffc107',
-  disconnected: '#f44336',
-  sleeping: '#5c6bc0',
-  waking: '#29b6f6'
-}
+import { getPanelType } from '../panel-ids'
+import { renderWindowContent, windowAgent, windowStatusColor, windowTitle } from './window-content'
 
 interface WorkspaceProps {
   windows: WindowState[]
@@ -424,38 +382,11 @@ export function Workspace({
         />
         {windows.map(win => {
           const panelType = getPanelType(win.id)
-          const agent = !panelType ? agents.find(a => a.id === win.id) : undefined
-          const statusColor = agent ? STATUS_COLORS[agent.status] ?? '#888' : undefined
-          const title = agent
-            ? `${agent.name} (${agent.cli}) \u00B7 ${agent.role}`
-            : win.title
+          const agent = windowAgent(win, agents)
+          const statusColor = windowStatusColor(win, agents)
+          const title = windowTitle(win, agents)
 
-          let content: React.ReactNode
-          if (panelType === 'pinboard') {
-            content = <PinboardPanel tabId={activeTabId} />
-          } else if (panelType === 'info') {
-            content = <InfoChannelPanel tabId={activeTabId} />
-          } else if (panelType === 'files') {
-            content = <FilePanel />
-          } else if (panelType === 'rac') {
-            content = <RacPanel />
-          } else if (panelType === 'usage') {
-            content = <UsagePanel />
-          } else if (panelType === 'git') {
-            content = <GitPanel />
-          } else if (panelType === 'schedules') {
-            content = <SchedulesPanel agents={agents} tabs={tabs} />
-          } else if (panelType === 'trollbox') {
-            content = <TrollboxPanel />
-          } else if (panelType === 'inbox') {
-            content = <InboxPanel />
-          } else if (panelType === 'board') {
-            content = <Workboard />
-          } else if (agent && agent.name.startsWith('rac-')) {
-            content = <RacAgentChat agentName={agent.name} />
-          } else {
-            content = <TerminalWindow agentId={win.id} theme={agent?.theme} />
-          }
+          const content = renderWindowContent(win, { agents, tabs, activeTabId })
 
           const otherWindows: WindowBounds[] = windows
             .filter(w => w.id !== win.id && !w.minimized)
