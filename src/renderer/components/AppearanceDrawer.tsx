@@ -1,4 +1,4 @@
-import React, { useRef, useState, useSyncExternalStore } from 'react'
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { appearanceStore, motionStore, useAppearance } from '../appearance-store'
 import { FONTS, PALETTES } from '../terminal-appearance'
 import type { Appearance, FontId } from '../terminal-appearance'
@@ -19,6 +19,14 @@ export function AppearanceDrawer({ open, onClose, focusedAgent }: AppearanceDraw
   const paused = useSyncExternalStore(motionStore.subscribe, motionStore.get)
   const [scope, setScope] = useState<Scope>('all')
   const radios = useRef<(HTMLButtonElement | null)[]>([])
+  const closeRef = useRef<HTMLButtonElement>(null)
+  // Start from the mount value so a drawer restored open does not steal focus
+  // from the terminal; only a later closed -> open transition moves focus in.
+  const wasOpen = useRef(open)
+  useEffect(() => {
+    if (open && !wasOpen.current) closeRef.current?.focus()
+    wasOpen.current = open
+  }, [open])
 
   if (!open) return null
 
@@ -51,12 +59,12 @@ export function AppearanceDrawer({ open, onClose, focusedAgent }: AppearanceDraw
       id="appearance-drawer"
       className="cog-drawer"
       aria-labelledby="appearance-drawer-title"
-      onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose() } }}
+      onKeyDown={(e) => { if (e.key === 'Escape' && !(e.target instanceof HTMLSelectElement)) { e.stopPropagation(); onClose() } }}
     >
       <div className="cog-drawer__head">
         <Icon name="palette" size={16} />
         <h2 id="appearance-drawer-title">Terminal appearance</h2>
-        <Button variant="icon" aria-label="Close Terminal appearance" title="Close" onClick={onClose}>
+        <Button ref={closeRef} variant="icon" aria-label="Close Terminal appearance" title="Close" onClick={onClose}>
           <Icon name="x" size={16} />
         </Button>
       </div>
