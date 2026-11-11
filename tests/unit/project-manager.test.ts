@@ -16,8 +16,9 @@ describe('ProjectManager', () => {
   })
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true })
-    fs.rmSync(projectDir, { recursive: true, force: true })
+    // Retries: Windows (AV/indexer) can briefly hold freshly written files → ENOTEMPTY.
+    fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    fs.rmSync(projectDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   })
 
   describe('initProject', () => {

@@ -68,4 +68,19 @@ describe.skipIf(!hasGit)('agent worktree against a real repo', () => {
     expect(fs.existsSync(path.join(leftover, '.git'))).toBe(true)
     expect(listAgentWorktrees(root).map((w) => w.slug)).toEqual(['builder-1'])
   }, 60000)
+
+  // git reports worktree paths in their long form; a project opened through an
+  // 8.3 short path (e.g. C:\Users\NAME~1.LOP\...) must still match them.
+  it.skipIf(process.platform !== 'win32')('reuses and lists worktrees when the project path is an 8.3 short name', () => {
+    const longRoot = fs.realpathSync.native(root)
+    const shortRoot = execSync(`cmd /c for %I in ("${longRoot}") do @echo %~sI`, { encoding: 'utf-8' }).trim()
+    if (!shortRoot || shortRoot.toLowerCase() === longRoot.toLowerCase()) return // 8.3 names disabled on this volume
+
+    const a = ensureAgentWorktree(shortRoot, 'Builder 1')
+    if (!a.ok) throw new Error(`ensure failed: ${a.detail}`)
+    const b = ensureAgentWorktree(shortRoot, 'Builder 1')
+    if (!b.ok) throw new Error(`ensure failed: ${b.detail}`)
+    expect(b.reused).toBe(true)
+    expect(listAgentWorktrees(shortRoot).map((w) => w.slug)).toEqual(['builder-1'])
+  }, 60000)
 })

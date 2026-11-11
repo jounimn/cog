@@ -25,7 +25,50 @@ const TINT_RGB: Record<Tint, [number, number, number] | null> = {
   grey: [140, 140, 140],
 }
 
+export interface KeyFontOptions {
+  loadSystemFonts: boolean
+  fontFiles?: string[]
+}
+
+// Fonts the key SVGs ask for ("Segoe UI, Arial, sans-serif", weights 400–700),
+// per platform. Loading just these replaces resvg's default of scanning every
+// installed font on each `new Resvg` — ~400 ms apiece on Windows, and a key
+// takes up to five instances.
+function fontCandidates(platform: NodeJS.Platform, winDir: string): string[] {
+  if (platform === 'win32') {
+    const dir = path.join(winDir, 'Fonts')
+    return ['segoeui.ttf', 'seguisb.ttf', 'segoeuib.ttf', 'arial.ttf', 'arialbd.ttf'].map(f => path.join(dir, f))
+  }
+  if (platform === 'darwin') {
+    return [
+      '/System/Library/Fonts/Supplemental/Arial.ttf',
+      '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+      '/Library/Fonts/Arial.ttf',
+    ]
+  }
+  return [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+  ]
+}
+
+/** Font options for text-bearing keys; falls back to the full system scan when none of the known files exist. */
+export function resolveKeyFontOptions(
+  platform: NodeJS.Platform = process.platform,
+  exists: (file: string) => boolean = fs.existsSync,
+  winDir: string = process.env.WINDIR ?? 'C:\\Windows'
+): KeyFontOptions {
+  const files = fontCandidates(platform, winDir).filter(f => exists(f))
+  return files.length > 0 ? { loadSystemFonts: false, fontFiles: files } : { loadSystemFonts: true }
+}
+
+// Composites that carry no <text> (faces, tint, final pixel pass) need no fonts at all.
+const NO_FONTS: KeyFontOptions = { loadSystemFonts: false }
+
 export class KeyRenderer {
+  private textFonts: KeyFontOptions = resolveKeyFontOptions()
   private svgRoot: string
   private size: number
   private cache = new Map<string, Buffer>()
@@ -91,6 +134,7 @@ export class KeyRenderer {
     const r = new Resvg(wrapper, {
       fitTo: { mode: 'width', value: this.size },
       background: '#1a1a1a',
+      font: NO_FONTS,
     })
     return r.render().pixels
   }
@@ -112,10 +156,11 @@ export class KeyRenderer {
     return svg
   }
 
-  private rasterize(svg: string | Buffer): Buffer {
+  private rasterize(svg: string | Buffer, fonts: KeyFontOptions = this.textFonts): Buffer {
     const r = new Resvg(svg, {
       fitTo: { mode: 'width', value: this.size },
       background: '#1a1a1a',
+      font: fonts,
     })
     return r.render().asPng()
   }
@@ -131,7 +176,7 @@ export class KeyRenderer {
       <image href="data:image/png;base64,${png.toString('base64')}" width="${this.size}" height="${this.size}"/>
       <rect width="100%" height="100%" fill="rgb(${rgb[0]},${rgb[1]},${rgb[2]})" opacity="0.35"/>
     </svg>`
-    return this.rasterize(composite)
+    return this.rasterize(composite, NO_FONTS)
   }
 
   private drawBadge(png: Buffer, text: string): Buffer {
