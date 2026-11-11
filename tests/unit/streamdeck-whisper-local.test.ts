@@ -5,6 +5,14 @@ vi.mock('nodejs-whisper', () => ({
   nodewhisper: vi.fn(async (_path: string) => 'hello from local whisper\n'),
 }))
 
+// Keep the test hermetic: under Electron's Node (npm test) shelljs can't
+// auto-detect execPath, so the client falls back to `which('node')`, which
+// walks the real PATH and can take seconds on a busy machine.
+vi.mock('shelljs', () => {
+  const sh = { config: { execPath: 'node' }, which: vi.fn(() => 'node') }
+  return { default: sh, ...sh }
+})
+
 import { LocalWhisperClient } from '../../src/main/streamdeck/whisper-client'
 
 describe('LocalWhisperClient', () => {
