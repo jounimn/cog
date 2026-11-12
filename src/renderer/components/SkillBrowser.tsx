@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import type { Skill } from '../../shared/types'
-import { Button, Icon, Input, Textarea, Select, Segmented, EmptyState, Row } from '../ui'
+import { Button, Icon, Input, Textarea, Select, Segmented, EmptyState, Row, Dialog } from '../ui'
 
 interface SkillBrowserProps {
   selectedIds: string[]
@@ -63,136 +63,134 @@ export function SkillBrowser({ selectedIds, onToggleSkill, onClose }: SkillBrows
   }
 
   return (
-    <div className="cog-modal-backdrop">
-      <div className="cog-skills" role="dialog" aria-modal="true" aria-labelledby="cog-skills-title">
-        <div className="cog-skills__head">
-          <h2 id="cog-skills-title">Skills browser</h2>
-          <Button variant="icon" onClick={onClose} aria-label="Close" title="Close"><Icon name="x" size={16} /></Button>
+    <Dialog
+      title="Skills browser"
+      icon="book-open"
+      size="md"
+      onClose={onClose}
+      bodyClassName="cog-skills"
+      footerStart={
+        <span className="cog-skills__count">
+          <b>{selectedIds.length}</b> skill{selectedIds.length !== 1 ? 's' : ''} attached
+        </span>
+      }
+      footer={<Button onClick={onClose}>Done</Button>}
+    >
+
+      {/* Tabs */}
+      <Segmented
+        ariaLabel="Skill source"
+        value={activeTab}
+        options={TAB_OPTIONS}
+        onChange={(tab) => { setActiveTab(tab); setSearch(''); setCategory('All') }}
+      />
+
+      {/* Search + Category (non-community tabs) */}
+      {activeTab !== 'community' && (
+        <>
+          <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search skills…" aria-label="Search skills" />
+          <div className="cog-skills__cats" role="group" aria-label="Category">
+            {CATEGORIES.map(cat => (
+              <Button key={cat} pressed={category === cat} onClick={() => setCategory(cat)}>{cat}</Button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Skill List */}
+      {activeTab !== 'community' && (
+        <div className="cog-skills__list">
+          {filteredSkills.length === 0 ? (
+            <EmptyState icon="book-open">
+              {activeTab === 'my-skills' ? 'No custom skills yet. Create one below.' : 'No skills match your search.'}
+            </EmptyState>
+          ) : filteredSkills.map(skill => {
+            const attached = selectedIds.includes(skill.id)
+            return (
+              <div key={skill.id} className="cog-skills__item">
+                <Row
+                  selected={attached}
+                  expanded={expandedId === skill.id}
+                  ariaLabel={attached ? `${skill.name}, attached` : skill.name}
+                  onClick={() => setExpandedId(expandedId === skill.id ? null : skill.id)}
+                  tooltip={skill.description}
+                  icon={<Icon name={expandedId === skill.id ? 'chevron-down' : 'chevron-right'} size={14} />}
+                  title={skill.name}
+                  meta={skill.description}
+                  state={
+                    <>
+                      {attached && <span className="cog-skills__attached"><Icon name="check" size={12} />Attached</span>}
+                      <span className="cog-skills__cat">{skill.category}</span>
+                    </>
+                  }
+                  actions={
+                    <>
+                      {skill.source !== 'built-in' && (
+                        <Button
+                          variant="icon"
+                          className="cog-tone-danger"
+                          onClick={() => handleDelete(skill.id)}
+                          aria-label={`Delete ${skill.name}`}
+                          title="Delete"
+                        >
+                          <Icon name="trash" size={14} />
+                        </Button>
+                      )}
+                      {attached
+                        ? <Button variant="ghost" onClick={() => onToggleSkill(skill)}><Icon name="minus" size={13} />Remove</Button>
+                        : <Button onClick={() => onToggleSkill(skill)}><Icon name="plus" size={13} />Attach</Button>}
+                    </>
+                  }
+                />
+                {expandedId === skill.id && (
+                  <pre className="cog-pre cog-skills__prompt">{skill.prompt}</pre>
+                )}
+              </div>
+            )
+          })}
         </div>
+      )}
 
-        {/* Tabs */}
-        <Segmented
-          ariaLabel="Skill source"
-          value={activeTab}
-          options={TAB_OPTIONS}
-          onChange={(tab) => { setActiveTab(tab); setSearch(''); setCategory('All') }}
-        />
+      {/* My Skills: Create button */}
+      {activeTab === 'my-skills' && !showCreateForm && (
+        <Button onClick={() => setShowCreateForm(true)}><Icon name="plus" size={14} />Create skill</Button>
+      )}
 
-        {/* Search + Category (non-community tabs) */}
-        {activeTab !== 'community' && (
-          <>
-            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search skills…" aria-label="Search skills" />
-            <div className="cog-skills__cats" role="group" aria-label="Category">
-              {CATEGORIES.map(cat => (
-                <Button key={cat} pressed={category === cat} onClick={() => setCategory(cat)}>{cat}</Button>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* Skill List */}
-        {activeTab !== 'community' && (
-          <div className="cog-skills__list">
-            {filteredSkills.length === 0 ? (
-              <EmptyState icon="book-open">
-                {activeTab === 'my-skills' ? 'No custom skills yet. Create one below.' : 'No skills match your search.'}
-              </EmptyState>
-            ) : filteredSkills.map(skill => {
-              const attached = selectedIds.includes(skill.id)
-              return (
-                <div key={skill.id} className="cog-skills__item">
-                  <Row
-                    selected={attached}
-                    expanded={expandedId === skill.id}
-                    ariaLabel={attached ? `${skill.name}, attached` : skill.name}
-                    onClick={() => setExpandedId(expandedId === skill.id ? null : skill.id)}
-                    tooltip={skill.description}
-                    icon={<Icon name={expandedId === skill.id ? 'chevron-down' : 'chevron-right'} size={14} />}
-                    title={skill.name}
-                    meta={skill.description}
-                    state={
-                      <>
-                        {attached && <span className="cog-skills__attached"><Icon name="check" size={12} />Attached</span>}
-                        <span className="cog-skills__cat">{skill.category}</span>
-                      </>
-                    }
-                    actions={
-                      <>
-                        {skill.source !== 'built-in' && (
-                          <Button
-                            variant="icon"
-                            className="cog-tone-danger"
-                            onClick={() => handleDelete(skill.id)}
-                            aria-label={`Delete ${skill.name}`}
-                            title="Delete"
-                          >
-                            <Icon name="trash" size={14} />
-                          </Button>
-                        )}
-                        {attached
-                          ? <Button variant="ghost" onClick={() => onToggleSkill(skill)}><Icon name="minus" size={13} />Remove</Button>
-                          : <Button onClick={() => onToggleSkill(skill)}><Icon name="plus" size={13} />Attach</Button>}
-                      </>
-                    }
-                  />
-                  {expandedId === skill.id && (
-                    <pre className="cog-pre cog-skills__prompt">{skill.prompt}</pre>
-                  )}
-                </div>
-              )
-            })}
+      {/* Create Skill Form */}
+      {activeTab === 'my-skills' && showCreateForm && (
+        <div className="cog-skills__form">
+          <Input value={newSkill.name} onChange={e => setNewSkill(p => ({ ...p, name: e.target.value }))}
+            placeholder="Skill name" aria-label="Skill name" />
+          <Input value={newSkill.description} onChange={e => setNewSkill(p => ({ ...p, description: e.target.value }))}
+            placeholder="Description" aria-label="Description" />
+          <Select
+            value={newSkill.category}
+            options={CATEGORIES.filter(c => c !== 'All').map(c => ({ value: c, label: c }))}
+            onChange={(value) => setNewSkill(p => ({ ...p, category: value }))}
+          />
+          <Textarea value={newSkill.prompt} onChange={e => setNewSkill(p => ({ ...p, prompt: e.target.value }))}
+            placeholder="Skill prompt (instructions for the agent)" rows={4} aria-label="Skill prompt" />
+          <Input value={newSkill.tags} onChange={e => setNewSkill(p => ({ ...p, tags: e.target.value }))}
+            placeholder="Tags (comma-separated)" aria-label="Tags" />
+          <div className="cog-skills__formactions">
+            <Button variant="ghost" onClick={() => setShowCreateForm(false)}>Cancel</Button>
+            <Button onClick={handleCreate} disabled={!newSkill.name || !newSkill.prompt}>Save</Button>
           </div>
-        )}
-
-        {/* My Skills: Create button */}
-        {activeTab === 'my-skills' && !showCreateForm && (
-          <Button onClick={() => setShowCreateForm(true)}><Icon name="plus" size={14} />Create skill</Button>
-        )}
-
-        {/* Create Skill Form */}
-        {activeTab === 'my-skills' && showCreateForm && (
-          <div className="cog-skills__form">
-            <Input value={newSkill.name} onChange={e => setNewSkill(p => ({ ...p, name: e.target.value }))}
-              placeholder="Skill name" aria-label="Skill name" />
-            <Input value={newSkill.description} onChange={e => setNewSkill(p => ({ ...p, description: e.target.value }))}
-              placeholder="Description" aria-label="Description" />
-            <Select
-              value={newSkill.category}
-              options={CATEGORIES.filter(c => c !== 'All').map(c => ({ value: c, label: c }))}
-              onChange={(value) => setNewSkill(p => ({ ...p, category: value }))}
-            />
-            <Textarea value={newSkill.prompt} onChange={e => setNewSkill(p => ({ ...p, prompt: e.target.value }))}
-              placeholder="Skill prompt (instructions for the agent)" rows={4} aria-label="Skill prompt" />
-            <Input value={newSkill.tags} onChange={e => setNewSkill(p => ({ ...p, tags: e.target.value }))}
-              placeholder="Tags (comma-separated)" aria-label="Tags" />
-            <div className="cog-skills__formactions">
-              <Button variant="ghost" onClick={() => setShowCreateForm(false)}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={!newSkill.name || !newSkill.prompt}>Save</Button>
-            </div>
-          </div>
-        )}
-
-        {/* Community Tab */}
-        {activeTab === 'community' && (
-          <div className="cog-skills__community">
-            <p>Browse 90,000+ community skills on skills.sh</p>
-            <Button onClick={() => window.open('https://skills.sh', '_blank')}>
-              <Icon name="external-link" size={14} />Open skills.sh
-            </Button>
-            <p className="cog-skills__hint">
-              Find a skill you like, then create it in "My skills" with the prompt content.
-            </p>
-          </div>
-        )}
-
-        {/* Footer */}
-        <div className="cog-skills__foot">
-          <span>
-            <b>{selectedIds.length}</b> skill{selectedIds.length !== 1 ? 's' : ''} attached
-          </span>
-          <Button onClick={onClose}>Done</Button>
         </div>
-      </div>
-    </div>
+      )}
+
+      {/* Community Tab */}
+      {activeTab === 'community' && (
+        <div className="cog-skills__community">
+          <p>Browse 90,000+ community skills on skills.sh</p>
+          <Button onClick={() => window.open('https://skills.sh', '_blank')}>
+            <Icon name="external-link" size={14} />Open skills.sh
+          </Button>
+          <p className="cog-skills__hint">
+            Find a skill you like, then create it in "My skills" with the prompt content.
+          </p>
+        </div>
+      )}
+    </Dialog>
   )
 }

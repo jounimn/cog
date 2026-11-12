@@ -5,12 +5,14 @@ export interface SelectProps<T extends string> {
   options: { value: T; label: string }[]
   onChange: (value: T) => void
   id?: string
+  disabled?: boolean
+  ariaLabel?: string
 }
 
-export function Select<T extends string>({ value, options, onChange, id }: SelectProps<T>): React.ReactElement {
+export function Select<T extends string>({ value, options, onChange, id, disabled, ariaLabel }: SelectProps<T>): React.ReactElement {
   return (
     <span className="cog-select">
-      <select id={id} value={value} onChange={(e) => onChange(e.target.value as T)}>
+      <select id={id} value={value} disabled={disabled} aria-label={ariaLabel} onChange={(e) => onChange(e.target.value as T)}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>{o.label}</option>
         ))}

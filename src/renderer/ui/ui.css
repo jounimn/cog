@@ -674,17 +674,103 @@
 .cog-sched__history li { display: flex; align-items: center; gap: 6px; }
 .cog-sched__history li > span { display: inline-flex; align-items: center; gap: 4px; }
 
-/* ---------- Skills browser (overlay opened from the agent form) ---------- */
+/* ---------- Dialog shell (ui/Dialog) ---------- */
 .cog-modal-backdrop { position: fixed; inset: 0; z-index: 100001; display: flex; align-items: center; justify-content: center; background: rgb(var(--canvas) / 0.7); }
-.cog-skills {
-  display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;
-  width: 550px; max-width: calc(100vw - 32px); max-height: 600px; padding: 20px;
+.cog-modal-backdrop--opaque { background: rgb(var(--canvas)); }
+@keyframes cog-dialog-in { from { opacity: 0; } to { opacity: 1; } }
+.cog-dialog {
+  position: relative; display: flex; flex-direction: column; box-sizing: border-box;
+  width: 560px; max-width: calc(100vw - 32px); max-height: 85vh; margin: 0;
   background: rgb(var(--surface)); border: 1px solid rgb(var(--line-strong)); border-radius: var(--r);
-  box-shadow: 0 8px 24px rgb(var(--surface-sunk) / 0.5);
-  color: rgb(var(--ink)); font: 400 13px/1.2 var(--font-text);
+  color: rgb(var(--ink)); font: 400 13px/1.4 var(--font-text);
+  /* 120 ms: two thirds of --dur, so it goes to 0 with it under reduced motion */
+  animation: cog-dialog-in calc(var(--dur) * 2 / 3) var(--ease-out);
 }
-.cog-skills__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.cog-skills__head h2 { margin: 0; font: 600 15px/1.2 var(--font-text); color: rgb(var(--ink)); }
+.cog-dialog--sm { width: 440px; }
+.cog-dialog--md { width: 560px; }
+.cog-dialog--lg { width: 760px; }
+.cog-dialog__head {
+  display: flex; align-items: center; gap: 8px; flex-shrink: 0; height: 44px; box-sizing: border-box;
+  padding: 0 8px 0 16px; border-bottom: 1px solid rgb(var(--line));
+}
+.cog-dialog__icon { display: inline-flex; flex: none; color: rgb(var(--ink-muted)); }
+.cog-dialog__title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.2 var(--font-text); color: rgb(var(--ink)); }
+.cog-dialog__title-sub { font-weight: 400; color: rgb(var(--ink-muted)); }
+.cog-dialog__extra { flex: none; font: 400 12px/1 var(--font-mono); color: rgb(var(--ink-subtle)); }
+.cog-dialog__body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.cog-dialog__foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0;
+  padding: 10px 16px; border-top: 1px solid rgb(var(--line));
+}
+.cog-dialog__foot-start { display: flex; align-items: center; gap: 6px; min-width: 0; font: 400 12px/1.3 var(--font-text); color: rgb(var(--ink-subtle)); }
+.cog-dialog__foot-end { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.cog-dialog .cog-btn > svg { flex: none; }
+/* The dialog's single primary: the default button, filled in steel. Never --hint. */
+.cog-dialog__foot .cog-btn--default { background: rgb(var(--surface-muted)); color: rgb(var(--ink)); border-color: rgb(var(--line-strong)); }
+.cog-dialog__foot .cog-btn--default:hover { background: rgb(var(--line)); border-color: rgb(var(--steel)); }
+.cog-dialog__foot .cog-btn--default:disabled { background: transparent; color: rgb(var(--ink-muted)); border-color: rgb(var(--line)); }
+.cog-dialog .cog-input, .cog-dialog .cog-select { width: 100%; }
+.cog-dialog .cog-input { border-color: rgb(var(--line-strong)); }
+.cog-dialog .cog-input:hover { border-color: rgb(var(--steel)); }
+.cog-dialog .cog-input:focus { border-color: rgb(var(--focus)); }
+.cog-field__error { display: inline-flex; align-items: center; gap: 4px; font: 400 12px/1.3 var(--font-text); color: rgb(var(--danger)); }
+.cog-field__error > svg { flex: none; }
+.cog-field--row { flex-direction: row; align-items: center; gap: 8px; }
+.cog-field__inline { display: flex; gap: 6px; }
+.cog-field__inline .cog-input { flex: 1; }
+.cog-dialog__group { display: flex; flex-direction: column; gap: 12px; }
+.cog-dialog .cog-section { margin: 0 -16px; padding-left: 16px; border-top: 1px solid rgb(var(--line)); }
+.cog-dialog__checks { display: flex; flex-direction: column; gap: 8px; }
+.cog-dialog__checkhint { margin-left: 24px; font: 400 12px/1.3 var(--font-text); color: rgb(var(--ink-subtle)); }
+.cog-dialog__checkhint .cog-mono { font-size: 12px; }
+.cog-dialog__overlay {
+  position: absolute; left: 16px; right: 16px; top: 50%; transform: translateY(-50%); z-index: 1;
+  padding: 16px; background: rgb(var(--surface)); border: 1px solid rgb(var(--danger)); border-radius: var(--r);
+}
+.cog-dialog__overlay p { margin: 0 0 10px; color: rgb(var(--ink)); font: 400 13px/1.4 var(--font-text); }
+.cog-dialog__overlay-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.cog-dialog__list { display: flex; flex-direction: column; border: 1px solid rgb(var(--line)); border-radius: var(--r); background: rgb(var(--surface-sunk)); overflow: auto; }
+.cog-dialog__list .cog-row { width: 100%; box-sizing: border-box; border-top: 0; border-left: 0; border-right: 0; background: transparent; text-align: left; }
+.cog-dialog__list button.cog-row:hover:not(:disabled) { background: rgb(var(--surface-muted)); }
+.cog-dialog__list button.cog-row:disabled { cursor: wait; opacity: 0.6; }
+.cog-dialog__list .cog-row__meta { font: 400 12px/1.2 var(--font-mono); }
+.cog-dialog__list .cog-row .cog-btn--icon { width: 24px; height: 24px; }
+
+/* Agent form */
+.cog-agentform__skills { display: flex; flex-direction: column; gap: 6px; }
+.cog-agentform__skills .cog-dialog__list { max-height: 160px; }
+.cog-agentform__skills > .cog-btn { align-self: flex-start; }
+.cog-agentform__note { margin: 0; font: 400 12px/1.45 var(--font-text); }
+.cog-agentform__notes { resize: vertical; }
+.cog-agentform__advanced { align-self: flex-start; margin-left: -4px; }
+
+/* What's new */
+.cog-whatsnew { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.cog-whatsnew li { display: flex; align-items: flex-start; gap: 8px; padding: 4px 8px; font: 400 13px/1.55 var(--font-text); color: rgb(var(--ink)); border-left: 2px solid rgb(var(--line-strong)); }
+.cog-whatsnew li > svg { flex: none; margin-top: 3px; }
+.cog-whatsnew--feat > svg { color: rgb(var(--success)); }
+.cog-whatsnew--fix > svg { color: rgb(var(--warning)); }
+.cog-whatsnew--refactor > svg { color: rgb(var(--working)); }
+.cog-whatsnew li.cog-whatsnew--chore { color: rgb(var(--ink-muted)); }
+.cog-whatsnew--chore > svg, .cog-whatsnew--other > svg { color: rgb(var(--ink-subtle)); }
+
+/* Schedule */
+.cog-schedule__prompt { resize: vertical; }
+.cog-field--disabled { opacity: 0.4; }
+
+/* Project picker */
+.cog-picker__open { align-self: flex-start; }
+.cog-picker__recent { display: flex; flex-direction: column; gap: 6px; }
+.cog-picker__list { max-height: 360px; }
+
+/* Bug report */
+.cog-bug__text { resize: vertical; }
+.cog-bug__info { display: flex; flex-direction: column; gap: 4px; font: 500 12px/1.2 var(--font-text); color: rgb(var(--ink-muted)); }
+.cog-bug__info .cog-pre { max-height: 140px; font-size: 12px; color: rgb(var(--ink-subtle)); }
+.cog-bug__result { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid currentColor; border-radius: var(--r); font: 400 12px/1.3 var(--font-text); }
+.cog-bug__thanks { margin: 0; text-align: center; font: 400 12px/1.3 var(--font-text); color: rgb(var(--ink-subtle)); }
+
+/* ---------- Skills browser (opened from the agent form, on the dialog shell) ---------- */
 .cog-skills .cog-seg { display: flex; }
 .cog-skills .cog-seg__item { flex: 1; justify-content: center; }
 .cog-skills__cats { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -705,9 +791,7 @@
 .cog-skills__community { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 0; text-align: center; color: rgb(var(--ink-muted)); }
 .cog-skills__community p { margin: 0; }
 .cog-skills__community .cog-skills__hint { max-width: 350px; font-size: 12px; color: rgb(var(--ink-subtle)); }
-.cog-skills__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid rgb(var(--line)); font: 400 12px/1 var(--font-text); color: rgb(var(--ink-subtle)); }
-.cog-skills__foot b { font: 500 12px/1 var(--font-mono); color: rgb(var(--ink-muted)); }
-.cog-skills .cog-btn > svg { flex: none; }
+.cog-skills__count b { font: 500 12px/1 var(--font-mono); color: rgb(var(--ink-muted)); }
 
 /* ---------- Update notice (toast) ---------- */
 .cog-toast {
