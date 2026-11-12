@@ -103,12 +103,19 @@ export function SkillBrowser({ selectedIds, onToggleSkill, onClose }: SkillBrows
                 <div key={skill.id} className="cog-skills__item">
                   <Row
                     selected={attached}
+                    expanded={expandedId === skill.id}
+                    ariaLabel={attached ? `${skill.name}, attached` : skill.name}
                     onClick={() => setExpandedId(expandedId === skill.id ? null : skill.id)}
                     tooltip={skill.description}
                     icon={<Icon name={expandedId === skill.id ? 'chevron-down' : 'chevron-right'} size={14} />}
                     title={skill.name}
                     meta={skill.description}
-                    state={<span className="cog-skills__cat">{skill.category}</span>}
+                    state={
+                      <>
+                        {attached && <span className="cog-skills__attached"><Icon name="check" size={12} />Attached</span>}
+                        <span className="cog-skills__cat">{skill.category}</span>
+                      </>
+                    }
                     actions={
                       <>
                         {skill.source !== 'built-in' && (

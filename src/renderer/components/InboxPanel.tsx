@@ -83,6 +83,7 @@ export function InboxPanel(): React.ReactElement {
     await window.electronAPI.inboxDelete(id)
     setMessages(prev => prev.filter(m => m.id !== id))
   }
+  const hasUnread = messages.some(m => !m.readAt)
   const handleMarkAllRead = async () => {
     await window.electronAPI.inboxMarkAllRead()
   }
@@ -108,7 +109,7 @@ export function InboxPanel(): React.ReactElement {
       <Toolbar
         label="Inbox"
         actions={
-          <Button variant="ghost" onClick={handleMarkAllRead}>
+          <Button variant="ghost" onClick={handleMarkAllRead} disabled={!hasUnread}>
             <Icon name="check" size={15} />Mark all read
           </Button>
         }

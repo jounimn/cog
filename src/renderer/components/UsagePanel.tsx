@@ -86,22 +86,23 @@ export function UsagePanel(): React.ReactElement {
       <Toolbar
         label="Usage"
         actions={
-          <Button variant="ghost" onClick={handleRefresh} disabled={refreshing}>
+          <Button onClick={handleRefresh} disabled={refreshing}>
             <Icon name="refresh-cw" size={14} />{refreshing ? 'Checking…' : 'Refresh limits'}
           </Button>
         }
-      >
-        <span className="cog-toolbar__title"><Icon name="gauge" size={14} /><span>Usage</span></span>
-      </Toolbar>
+      />
 
       <div className="cog-panel__body">
+        {metrics.length > 0 && metrics.some(m => !m.providerUsage) && (
+          <EmptyState icon="gauge" compact>Provider limits: click Refresh limits to check.</EmptyState>
+        )}
         {metrics.length === 0 ? (
           <EmptyState icon="gauge">No agents running. Spawn agents to see usage.</EmptyState>
         ) : metrics.map(m => (
           <section key={m.agentName} className="cog-usage__agent">
             <div className="cog-usage__head">
               <span className="cog-usage__name">{m.agentName}</span>
-              <span className="cog-usage__spec" title={`${m.cli} ${m.model}`}>{m.cli} {m.model}</span>
+              <span className="cog-usage__spec" title={`${m.cli} ${m.model}`}>{m.cli} <span className="cog-mono">{m.model}</span></span>
             </div>
 
             {m.providerUsage && m.providerUsage.total > 0 && m.providerUsage.unit !== 'unknown' && (
@@ -110,12 +111,6 @@ export function UsagePanel(): React.ReactElement {
 
             {m.providerUsage?.raw && (
               <pre className="cog-pre">{m.providerUsage.raw}</pre>
-            )}
-
-            {!m.providerUsage && (
-              <div className="cog-usage__hint">
-                Provider limits: click Refresh limits to check
-              </div>
             )}
 
             <div className="cog-usage__counts">

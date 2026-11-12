@@ -86,9 +86,7 @@ export function SchedulesPanel({ agents, tabs }: Props): React.ReactElement {
             <Icon name="plus" size={14} />New
           </Button>
         }
-      >
-        <span className="cog-toolbar__title"><Icon name="calendar-clock" size={14} /><span>Schedules</span></span>
-      </Toolbar>
+      />
 
       <div className="cog-panel__body">
         {active.length === 0 && past.length === 0 && (

@@ -106,7 +106,7 @@ export function TopBar({
     { label: 'Git', icon: 'git-branch', open: gitOpen, onClick: onToggleGit },
     { label: 'Files', icon: 'file-text', open: filesOpen, onClick: onToggleFiles },
     { label: 'Pinboard', icon: 'pin', open: pinboardOpen, onClick: onTogglePinboard },
-    { label: 'Info Channel', icon: 'radio', open: infoOpen, onClick: onToggleInfo },
+    { label: 'Info channel', icon: 'radio', open: infoOpen, onClick: onToggleInfo },
     { label: 'Usage', icon: 'gauge', open: usageOpen, onClick: onToggleUsage },
     { label: 'R.A.C.', icon: 'messages-square', open: racOpen, onClick: onToggleRac },
     { label: 'Schedules', icon: 'calendar-clock', open: schedulesOpen, onClick: onToggleSchedules, divider: true },

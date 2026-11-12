@@ -377,7 +377,7 @@ export function GitPanel(): React.ReactElement {
                   placeholder="branch-name"
                   aria-label="New branch name"
                 />
-                <Button onClick={createBranch} disabled={loading === 'new-branch'}>
+                <Button variant="ghost" onClick={createBranch} disabled={loading === 'new-branch'}>
                   {loading === 'new-branch' ? 'Creating…' : 'Create'}
                 </Button>
                 <Button variant="icon" className="cog-btn--ghost" onClick={cancelNewBranch} aria-label="Cancel new branch" title="Cancel">
@@ -459,6 +459,17 @@ export function GitPanel(): React.ReactElement {
             </>
           )}
         </span>
+
+        {/* View mode: Status / Log */}
+        <Segmented
+          ariaLabel="Git view"
+          value={viewMode}
+          options={[
+            { value: 'status', label: 'Status', icon: 'file-text' },
+            { value: 'log', label: 'Log', icon: 'git-commit' }
+          ]}
+          onChange={mode => { setViewMode(mode); if (mode === 'log') refreshLog() }}
+        />
       </Toolbar>
 
       {/* ── Agent worktrees ──────────────────────────────── */}
@@ -507,19 +518,6 @@ export function GitPanel(): React.ReactElement {
           ))}
         </div>
       )}
-
-      {/* ── View mode toggle ─────────────────────────────── */}
-      <div className="cog-git__view">
-        <Segmented
-          ariaLabel="Git view"
-          value={viewMode}
-          options={[
-            { value: 'status', label: 'Status', icon: 'file-text' },
-            { value: 'log', label: 'Log', icon: 'git-commit' }
-          ]}
-          onChange={mode => { setViewMode(mode); if (mode === 'log') refreshLog() }}
-        />
-      </div>
 
       {/* ── Content area ─────────────────────────────────── */}
       <div className="cog-git__body">

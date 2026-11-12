@@ -9,6 +9,6 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   { variant = 'default', pressed, className, type = 'button', ...rest },
   ref
 ) {
-  const cls = ['cog-btn', variant !== 'default' && `cog-btn--${variant}`, className].filter(Boolean).join(' ')
+  const cls = ['cog-btn', `cog-btn--${variant}`, className].filter(Boolean).join(' ')
   return <button ref={ref} type={type} className={cls} aria-pressed={pressed} {...rest} />
 })

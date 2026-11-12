@@ -13,6 +13,10 @@ export interface RowProps {
   /** Controls at the right edge; their clicks do not reach onClick. */
   actions?: React.ReactNode
   selected?: boolean
+  /** For a row that toggles a disclosure: sets aria-expanded, and `selected` stays visual only (no aria-pressed). */
+  expanded?: boolean
+  /** Accessible name when the visible title alone does not carry the row's state. */
+  ariaLabel?: string
   onClick?: () => void
   /** Native tooltip. */
   tooltip?: string
@@ -21,7 +25,7 @@ export interface RowProps {
 
 /** The list row from the Pinboard audition: icon, mono id, ellipsed title, a subtle second line. */
 export function Row({
-  icon, id, title, meta, state, actions, selected, onClick, tooltip, className
+  icon, id, title, meta, state, actions, selected, expanded, ariaLabel, onClick, tooltip, className
 }: RowProps): React.ReactElement {
   const cls = [
     'cog-row',
@@ -37,7 +41,9 @@ export function Row({
       onClick={onClick}
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
-      aria-pressed={interactive && selected !== undefined ? selected : undefined}
+      aria-pressed={interactive && expanded === undefined && selected !== undefined ? selected : undefined}
+      aria-expanded={interactive ? expanded : undefined}
+      aria-label={ariaLabel}
       onKeyDown={interactive ? (e) => {
         // Only the row itself: a focused action inside handles its own keys.
         if (e.target !== e.currentTarget) return

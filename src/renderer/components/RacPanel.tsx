@@ -287,9 +287,7 @@ export function RacPanel(): React.ReactElement {
             <Icon name={editingUrl ? 'x' : 'settings'} size={15} />
           </Button>
         }
-      >
-        <span className="cog-toolbar__title"><Icon name="bot" size={14} /><span>R.A.C. — Rent-A-Claude</span></span>
-      </Toolbar>
+      />
 
       {/* Server URL config */}
       {editingUrl && (
@@ -331,7 +329,7 @@ export function RacPanel(): React.ReactElement {
                   </span>
                 }
                 state={<span className={`cog-rac__time${left === 'Expired' ? ' cog-tone-danger' : ''}`}>{left}</span>}
-                actions={<Button onClick={() => handleOpenRentDialog(slot)}>Rent</Button>}
+                actions={<Button variant="ghost" onClick={() => handleOpenRentDialog(slot)}>Rent</Button>}
               />
             )
           })}
