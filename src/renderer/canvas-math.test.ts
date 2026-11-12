@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { fitViewport, clientToCanvas, headerScale, FIT_INSETS } from './canvas-math'
+import { fitViewport, clientToCanvas, headerScale, clampZoom, FIT_INSETS, MIN_ZOOM, MAX_ZOOM } from './canvas-math'
 import type { Bounds } from './window-layout'
 
 describe('fitViewport', () => {
@@ -93,5 +93,21 @@ describe('clientToCanvas', () => {
     const rect = { left: 10, top: 44 }
     const p = clientToCanvas(10 + 100 + 2 * 30, 44 + 50 + 2 * 20, rect, { x: 100, y: 50 }, 2)
     expect(p).toEqual({ x: 30, y: 20 })
+  })
+})
+
+describe('clampZoom', () => {
+  it('passes a zoom inside the range through', () => {
+    expect(clampZoom(1)).toBe(1)
+    expect(clampZoom(0.8)).toBe(0.8)
+  })
+  it('keeps the range ends', () => {
+    expect(clampZoom(MIN_ZOOM)).toBe(MIN_ZOOM)
+    expect(clampZoom(MAX_ZOOM)).toBe(MAX_ZOOM)
+  })
+  it('clamps below the floor and above the ceiling', () => {
+    expect(clampZoom(0.01)).toBe(MIN_ZOOM)
+    expect(clampZoom(-3)).toBe(MIN_ZOOM)
+    expect(clampZoom(10)).toBe(MAX_ZOOM)
   })
 })
