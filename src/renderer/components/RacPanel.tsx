@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { hashCrewPassword as hashPassword, CREW_ACCESS_HASH } from '../../shared/crew-auth'
+import { Button, Icon, Input, Textarea, EmptyState, Row, Toolbar, SectionHeader } from '../ui'
 
 interface RacSlot {
   slot_id: string
@@ -130,32 +131,27 @@ export function RacPanel(): React.ReactElement {
   // --- Lock screen ---
   if (!unlocked) {
     return (
-      <div style={{
-        height: '100%', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        backgroundColor: '#1e1e1e', color: '#e0e0e0', gap: '12px', padding: '24px'
-      }}>
-        <div style={{ fontSize: '14px', fontWeight: 500 }}>R.A.C. — Crew Access Only</div>
-        <div style={{ color: '#666', fontSize: '12px', textAlign: 'center' }}>
+      <div className="cog-panel cog-rac-lock">
+        <span className="cog-rac-lock__icon"><Icon name="lock" size={20} /></span>
+        <h2 className="cog-rac-lock__title">R.A.C. — crew access only</h2>
+        <p className="cog-rac-lock__text">
           This feature is in private testing. Enter the crew password to access.
-        </div>
-        <input
+        </p>
+        <Input
           type="password"
           value={passwordInput}
           onChange={e => { setPasswordInput(e.target.value); setPasswordError(false) }}
           onKeyDown={e => e.key === 'Enter' && handleUnlock()}
           placeholder="Password"
-          style={{
-            backgroundColor: '#2a2a2a', border: `1px solid ${passwordError ? '#f44336' : '#444'}`,
-            borderRadius: '4px', padding: '8px 12px', color: '#e0e0e0', fontSize: '13px',
-            width: '200px', textAlign: 'center'
-          }}
+          aria-label="Crew password"
+          aria-invalid={passwordError || undefined}
         />
-        <button onClick={handleUnlock} style={{
-          padding: '6px 20px', backgroundColor: '#2d5a2d', border: '1px solid #4caf50',
-          borderRadius: '4px', color: '#4caf50', cursor: 'pointer', fontSize: '12px'
-        }}>Unlock</button>
-        {passwordError && <div style={{ color: '#f44336', fontSize: '11px' }}>Wrong password</div>}
+        <Button onClick={handleUnlock}>Unlock</Button>
+        {passwordError && (
+          <div className="cog-rac-lock__error cog-tone-danger" role="alert">
+            <Icon name="circle-alert" size={14} />Wrong password
+          </div>
+        )}
       </div>
     )
   }
@@ -214,80 +210,61 @@ export function RacPanel(): React.ReactElement {
   // --- Rent dialog view ---
   if (view === 'rent-dialog' && selectedSlot) {
     return (
-      <div style={{
-        height: '100%', display: 'flex', flexDirection: 'column',
-        backgroundColor: '#1e1e1e', color: '#e0e0e0', fontSize: '13px'
-      }}>
-        <div style={{
-          padding: '8px 12px', borderBottom: '1px solid #333',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-        }}>
-          <span style={{ fontSize: '12px', color: '#888', fontWeight: 500 }}>
-            Rent {selectedSlot.parker_name}'s Claude
+      <div className="cog-panel cog-rac">
+        <Toolbar
+          label="Rent"
+          actions={
+            <Button variant="icon" onClick={() => setView('list')} aria-label="Close" title="Close">
+              <Icon name="x" size={15} />
+            </Button>
+          }
+        >
+          <span className="cog-toolbar__title">
+            <Icon name="bot" size={14} /><span>Rent {selectedSlot.parker_name}'s Claude</span>
           </span>
-          <button onClick={() => setView('list')} style={{
-            background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '14px'
-          }}>x</button>
-        </div>
+        </Toolbar>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div className="cog-panel__body cog-rac__form">
           {/* Slot info */}
-          <div style={{ padding: '8px', backgroundColor: '#252525', borderRadius: '4px', border: '1px solid #333' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span><span style={{ color: '#4caf50' }}>{'\u25CF'}</span> {selectedSlot.parker_name}</span>
-              <span style={{ color: '#888', fontSize: '11px' }}>{selectedSlot.tier}</span>
-            </div>
-            <div style={{ color: '#ffc107', fontSize: '12px', marginTop: '4px' }}>
-              Time remaining: {liveTimeLeft(selectedSlot)}
-            </div>
-            {selectedSlot.note && (
-              <div style={{ color: '#888', fontSize: '11px', marginTop: '4px', fontStyle: 'italic' }}>"{selectedSlot.note}"</div>
-            )}
-          </div>
+          <dl className="cog-facts">
+            <dt>Parker</dt>
+            <dd>{selectedSlot.parker_name}</dd>
+            <dt>Tier</dt>
+            <dd>{selectedSlot.tier}</dd>
+            <dt>Time remaining</dt>
+            <dd className="cog-mono">{liveTimeLeft(selectedSlot)}</dd>
+            {selectedSlot.note && (<><dt>Note</dt><dd>"{selectedSlot.note}"</dd></>)}
+          </dl>
 
           {/* Renter name */}
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#aaa' }}>
-            Your Name
-            <input value={rentName} onChange={e => setRentName(e.target.value)} style={{
-              backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '4px',
-              padding: '6px 8px', color: '#e0e0e0', fontSize: '12px'
-            }} />
+          <label className="cog-field">
+            Your name
+            <Input value={rentName} onChange={e => setRentName(e.target.value)} />
           </label>
 
           {/* Git repo */}
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#aaa' }}>
-            Git Repository (optional)
-            <input value={rentGitRepo} onChange={e => setRentGitRepo(e.target.value)} placeholder="https://github.com/you/repo.git" style={{
-              backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '4px',
-              padding: '6px 8px', color: '#e0e0e0', fontSize: '12px'
-            }} />
-            <span style={{ color: '#555', fontSize: '10px' }}>The rented agent will clone this repo to access your codebase</span>
+          <label className="cog-field">
+            Git repository (optional)
+            <Input mono value={rentGitRepo} onChange={e => setRentGitRepo(e.target.value)} placeholder="https://github.com/you/repo.git" />
+            <span className="cog-field__hint">The rented agent will clone this repo to access your codebase</span>
           </label>
 
           {/* CEO Notes */}
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: '#aaa' }}>
-            Instructions for Rented Agent
-            <textarea value={rentCeoNotes} onChange={e => setRentCeoNotes(e.target.value)} rows={5} style={{
-              backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '4px',
-              padding: '6px 8px', color: '#e0e0e0', fontSize: '12px', resize: 'vertical', fontFamily: 'inherit'
-            }} />
+          <label className="cog-field">
+            Instructions for the rented agent
+            <Textarea value={rentCeoNotes} onChange={e => setRentCeoNotes(e.target.value)} rows={5} />
           </label>
 
           {/* Info box */}
-          <div style={{ padding: '8px', backgroundColor: '#1a2a3a', borderRadius: '4px', border: '1px solid #2a4a6a', fontSize: '11px', color: '#8cb4e0' }}>
-            This agent runs remotely in a Docker container. It communicates through hub messages — your orchestrator can send_message() to it and receive results back. It cannot access your local files directly.
+          <div className="cog-note">
+            <Icon name="info" size={14} />
+            <span>This agent runs remotely in a Docker container. It communicates through hub messages — your orchestrator can send_message() to it and receive results back. It cannot access your local files directly.</span>
           </div>
         </div>
 
-        <div style={{ padding: '8px 12px', borderTop: '1px solid #333', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button onClick={() => setView('list')} style={{
-            padding: '6px 16px', backgroundColor: '#2a2a2a', border: '1px solid #444',
-            borderRadius: '4px', color: '#aaa', cursor: 'pointer', fontSize: '12px'
-          }}>Cancel</button>
-          <button onClick={handleConfirmRent} disabled={renting} style={{
-            padding: '6px 16px', backgroundColor: '#2d5a2d', border: '1px solid #4caf50',
-            borderRadius: '4px', color: '#4caf50', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold'
-          }}>{renting ? 'Renting...' : 'RENT'}</button>
+        <div className="cog-rac__foot">
+          <Button variant="ghost" onClick={() => setView('list')}>Cancel</Button>
+          <Button onClick={handleConfirmRent} disabled={renting}>{renting ? 'Renting…' : 'Rent'}</Button>
         </div>
       </div>
     )
@@ -295,137 +272,103 @@ export function RacPanel(): React.ReactElement {
 
   // --- Main list view ---
   return (
-    <div style={{
-      height: '100%', display: 'flex', flexDirection: 'column',
-      backgroundColor: '#1e1e1e', color: '#e0e0e0', fontSize: '13px'
-    }}>
+    <div className="cog-panel cog-rac">
       {/* Header */}
-      <div style={{
-        padding: '8px 12px', borderBottom: '1px solid #333',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-      }}>
-        <span style={{ fontSize: '12px', color: '#888', fontWeight: 500 }}>
-          R.A.C. — Rent-A-Claude
-        </span>
-        <button onClick={() => setEditingUrl(!editingUrl)} style={{
-          background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '14px'
-        }}>
-          {editingUrl ? 'x' : '\u2699'}
-        </button>
-      </div>
+      <Toolbar
+        label="R.A.C."
+        actions={
+          <Button
+            variant="icon"
+            onClick={() => setEditingUrl(!editingUrl)}
+            aria-label={editingUrl ? 'Close server settings' : 'Server settings'}
+            title={editingUrl ? 'Close server settings' : 'Server settings'}
+            aria-expanded={editingUrl}
+          >
+            <Icon name={editingUrl ? 'x' : 'settings'} size={15} />
+          </Button>
+        }
+      >
+        <span className="cog-toolbar__title"><Icon name="bot" size={14} /><span>R.A.C. — Rent-A-Claude</span></span>
+      </Toolbar>
 
       {/* Server URL config */}
       {editingUrl && (
-        <div style={{ padding: '8px 12px', borderBottom: '1px solid #333', display: 'flex', gap: '4px' }}>
-          <input value={urlInput} onChange={e => setUrlInput(e.target.value)} style={{
-            flex: 1, backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '4px',
-            padding: '4px 8px', color: '#e0e0e0', fontSize: '11px'
-          }} placeholder="http://localhost:7700" />
-          <button onClick={handleSaveUrl} style={{
-            padding: '4px 8px', backgroundColor: '#2d5a2d', border: '1px solid #4caf50',
-            borderRadius: '4px', color: '#4caf50', cursor: 'pointer', fontSize: '11px'
-          }}>Save</button>
+        <div className="cog-rac__url">
+          <Input mono value={urlInput} onChange={e => setUrlInput(e.target.value)} placeholder="http://localhost:7700" aria-label="Server URL" />
+          <Button onClick={handleSaveUrl}>Save</Button>
         </div>
       )}
 
       {/* Error */}
       {error && (
-        <div style={{ padding: '6px 12px', backgroundColor: '#3a1a1a', color: '#ff6b6b', fontSize: '11px' }}>
-          {error}
+        <div className="cog-banner cog-banner--danger" role="alert">
+          <Icon name="circle-alert" size={14} />
+          <span className="cog-banner__text" title={error}>{error}</span>
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px' }}>
+      <div className="cog-panel__body">
         {/* Available slots */}
-        <div style={{ color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-          Available ({available.length})
+        <div className="cog-rac__group">
+          <SectionHeader count={available.length}>Available</SectionHeader>
+
+          {available.length === 0 && !error && (
+            <EmptyState icon="bot" compact>No slots available right now.</EmptyState>
+          )}
+
+          {available.map(slot => {
+            const left = liveTimeLeft(slot)
+            return (
+              <Row
+                key={slot.slot_id}
+                icon={<Icon name="bot" size={15} />}
+                title={slot.parker_name}
+                tooltip={slot.note ? `${slot.parker_name}\n\n"${slot.note}"` : slot.parker_name}
+                meta={
+                  <span className="cog-rac__meta">
+                    <span>{slot.tier}</span>
+                    {slot.note && <span>"{slot.note}"</span>}
+                  </span>
+                }
+                state={<span className={`cog-rac__time${left === 'Expired' ? ' cog-tone-danger' : ''}`}>{left}</span>}
+                actions={<Button onClick={() => handleOpenRentDialog(slot)}>Rent</Button>}
+              />
+            )
+          })}
         </div>
-
-        {available.length === 0 && !error && (
-          <div style={{ color: '#555', fontSize: '12px', padding: '12px 0', textAlign: 'center' }}>
-            No slots available right now.
-          </div>
-        )}
-
-        {available.map(slot => (
-          <div key={slot.slot_id} style={{
-            padding: '8px 10px', marginBottom: '4px', borderRadius: '4px',
-            backgroundColor: '#252525', border: '1px solid #333'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <span style={{ color: '#4caf50', marginRight: '6px' }}>{'\u25CF'}</span>
-                <span style={{ fontWeight: 500 }}>{slot.parker_name}</span>
-                <span style={{ color: '#666', fontSize: '11px', marginLeft: '8px' }}>{slot.tier}</span>
-              </div>
-              <button
-                onClick={() => handleOpenRentDialog(slot)}
-                style={{
-                  padding: '3px 10px', fontSize: '11px', borderRadius: '4px', cursor: 'pointer',
-                  border: '1px solid #4caf50', backgroundColor: '#2d5a2d', color: '#4caf50',
-                  fontWeight: 'bold'
-                }}
-              >
-                RENT
-              </button>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
-              {slot.note && (
-                <span style={{ color: '#888', fontSize: '11px', fontStyle: 'italic' }}>"{slot.note}"</span>
-              )}
-              <span style={{ color: '#ffc107', fontSize: '11px' }}>{liveTimeLeft(slot)}</span>
-            </div>
-          </div>
-        ))}
 
         {/* Rented sessions */}
         {sessions.length > 0 && (
-          <>
-            <div style={{
-              color: '#888', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px',
-              marginTop: '12px', marginBottom: '6px'
-            }}>
-              Rented ({sessions.length})
-            </div>
+          <div className="cog-rac__group">
+            <SectionHeader count={sessions.length}>Rented</SectionHeader>
 
             {sessions.map(session => (
-              <div key={session.session_id} style={{
-                padding: '8px 10px', marginBottom: '4px', borderRadius: '4px',
-                backgroundColor: '#252525', border: '1px solid #4a6fa5'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ color: '#4a9eff', marginRight: '6px' }}>{'\u25CF'}</span>
-                    <span style={{ fontWeight: 500 }}>{session.parker}</span>
-                    <span style={{ color: '#666', fontSize: '11px', marginLeft: '8px' }}>
-                      Agent: {session.agentorch_agent}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => handleRelease(session.session_id)}
-                    style={{
-                      padding: '3px 10px', fontSize: '11px', borderRadius: '4px', cursor: 'pointer',
-                      border: '1px solid #f44336', backgroundColor: '#3a1a1a', color: '#f44336'
-                    }}
-                  >
-                    RELEASE
-                  </button>
-                </div>
-                <div style={{ fontSize: '10px', color: '#555', marginTop: '4px' }}>
-                  Session: {session.session_id} | Status: {session.status}
-                </div>
-              </div>
+              <Row
+                key={session.session_id}
+                icon={<span className="cog-tone-working"><Icon name="circle-dot" size={15} /></span>}
+                title={session.parker}
+                tooltip={`Session ${session.session_id}`}
+                meta={
+                  <span className="cog-rac__meta">
+                    <span>Agent <span className="cog-mono">{session.agentorch_agent}</span></span>
+                    <span className="cog-mono">{session.session_id}</span>
+                  </span>
+                }
+                state={<span className="cog-rac__state cog-tone-working">{session.status}</span>}
+                actions={
+                  <Button variant="ghost" className="cog-tone-danger" onClick={() => handleRelease(session.session_id)}>
+                    Release
+                  </Button>
+                }
+              />
             ))}
-          </>
+          </div>
         )}
       </div>
 
       {/* Footer */}
-      <div style={{
-        padding: '6px 12px', borderTop: '1px solid #333',
-        fontSize: '10px', color: '#555', textAlign: 'center'
-      }}>
-        Server: {serverUrl}
+      <div className="cog-panel__foot" title={serverUrl}>
+        Server <span className="cog-mono">{serverUrl}</span>
       </div>
     </div>
   )

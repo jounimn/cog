@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { Button, Icon } from '../ui'
 
 interface UpdateInfo {
   available: boolean
@@ -57,100 +58,74 @@ export function UpdateNotice(): React.ReactElement | null {
 
   if (!update || !update.available || dismissed) return null
 
+  // Same body the close button and "Later" always ran: hide, and remember this sha for the cooldown.
+  const dismiss = () => {
+    setDismissed(true)
+    if (update) { dismissedShaRef.current = update.remoteSha; dismissedAtRef.current = Date.now() }
+  }
+
   return (
-    <div style={{
-      position: 'fixed',
-      bottom: '12px',
-      left: '12px',
-      backgroundColor: '#1e3a5f',
-      border: '1px solid #4a9eff',
-      borderRadius: '8px',
-      padding: '10px 14px',
-      zIndex: 99999,
-      maxWidth: '360px',
-      fontSize: '12px',
-      color: '#e0e0e0',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.4)'
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-        <span style={{ fontWeight: 600, color: '#8cc4ff' }}>Update Available</span>
-        <button onClick={() => { setDismissed(true); if (update) { dismissedShaRef.current = update.remoteSha; dismissedAtRef.current = Date.now() } }} style={{
-          background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '14px', padding: '0 2px'
-        }}>x</button>
+    <div className="cog-toast" role="status" aria-live="polite">
+      <div className="cog-toast__head">
+        <Icon name="download" size={15} />
+        <h2 className="cog-toast__title">Update available</h2>
+        <Button variant="icon" onClick={dismiss} aria-label="Dismiss" title="Dismiss"><Icon name="x" size={14} /></Button>
       </div>
-      <div style={{ color: '#aaa', fontSize: '11px', marginBottom: '4px' }}>
-        {update.currentSha} {'\u2192'} {update.remoteSha}
+      <div className="cog-toast__sha">
+        {update.currentSha} {'→'} {update.remoteSha}
       </div>
-      <div style={{ color: '#ccc', fontSize: '11px', marginBottom: '8px' }}>
+      <div className="cog-toast__msg">
         {update.message}
       </div>
 
       {/* Phase: Initial notification */}
       {phase === 'notify' && (
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button onClick={() => setPhase('confirm')} style={{
-            padding: '4px 12px', backgroundColor: '#2d5a2d', border: '1px solid #4caf50',
-            borderRadius: '4px', color: '#4caf50', cursor: 'pointer', fontSize: '11px'
-          }}>Update Now</button>
-          <button onClick={() => { setDismissed(true); if (update) { dismissedShaRef.current = update.remoteSha; dismissedAtRef.current = Date.now() } }} style={{
-            padding: '4px 12px', backgroundColor: 'transparent', border: '1px solid #444',
-            borderRadius: '4px', color: '#888', cursor: 'pointer', fontSize: '11px'
-          }}>Later</button>
+        <div className="cog-toast__actions">
+          <Button onClick={() => setPhase('confirm')}>Update now</Button>
+          <Button variant="ghost" onClick={dismiss}>Later</Button>
         </div>
       )}
 
       {/* Phase: Confirmation warning */}
       {phase === 'confirm' && (
         <div>
-          <div style={{
-            padding: '6px 8px', backgroundColor: '#3a2a1a', border: '1px solid #d0a85c',
-            borderRadius: '4px', marginBottom: '8px', fontSize: '11px', color: '#ffc107'
-          }}>
-            The Cog will restart after updating. All running agents will be stopped. Save any work before proceeding.
+          <div className="cog-note cog-note--warning" role="alert">
+            <Icon name="circle-alert" size={14} />
+            <span>The Cog will restart after updating. All running agents will be stopped. Save any work before proceeding.</span>
           </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button onClick={handleConfirmUpdate} style={{
-              padding: '4px 12px', backgroundColor: '#5a2d2d', border: '1px solid #f44336',
-              borderRadius: '4px', color: '#f44336', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold'
-            }}>Update + Restart</button>
-            <button onClick={() => setPhase('notify')} style={{
-              padding: '4px 12px', backgroundColor: 'transparent', border: '1px solid #444',
-              borderRadius: '4px', color: '#888', cursor: 'pointer', fontSize: '11px'
-            }}>Cancel</button>
+          <div className="cog-toast__actions">
+            <Button variant="ghost" className="cog-tone-danger" onClick={handleConfirmUpdate}>Update and restart</Button>
+            <Button variant="ghost" onClick={() => setPhase('notify')}>Cancel</Button>
           </div>
         </div>
       )}
 
       {/* Phase: Updating */}
       {phase === 'updating' && (
-        <div style={{ fontSize: '11px', color: '#ffc107' }}>
-          Updating... pulling latest code and installing dependencies.
+        <div className="cog-toast__status cog-tone-muted">
+          Updating… pulling latest code and installing dependencies.
         </div>
       )}
 
       {/* Phase: Done — restart button */}
       {phase === 'done' && (
         <div>
-          <div style={{ fontSize: '11px', color: '#4caf50', marginBottom: '6px' }}>
-            Update complete. Restart to apply.
+          <div className="cog-toast__status">
+            <Icon name="circle-check" size={14} />
+            <span>Update complete. Restart to apply.</span>
           </div>
-          <button onClick={() => electronAPI.restartApp()} style={{
-            padding: '4px 12px', backgroundColor: '#2d5a2d', border: '1px solid #4caf50',
-            borderRadius: '4px', color: '#4caf50', cursor: 'pointer', fontSize: '11px'
-          }}>Restart Now</button>
+          <Button onClick={() => electronAPI.restartApp()}>Restart now</Button>
         </div>
       )}
 
       {/* Phase: Failed */}
       {phase === 'failed' && (
         <div>
-          <div style={{ fontSize: '11px', color: '#f44336', marginBottom: '6px' }}>
-            Update failed: {errorMsg}
+          <div className="cog-toast__status cog-tone-danger">
+            <Icon name="circle-alert" size={14} />
+            <span>Update failed: {errorMsg}</span>
           </div>
-          <button onClick={() => setPhase('notify')} style={{
-            padding: '4px 12px', backgroundColor: 'transparent', border: '1px solid #444',
-            borderRadius: '4px', color: '#888', cursor: 'pointer', fontSize: '11px'
-          }}>OK</button>
+          <Button variant="ghost" onClick={() => setPhase('notify')}>OK</Button>
         </div>
       )}
     </div>

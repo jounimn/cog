@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from 'react'
+import { Button, Icon, EmptyState, Toolbar } from '../ui'
+import { usagePresentation, uptimeLabel } from '../panel-present'
 
 interface AgentMetricsData {
   agentName: string
@@ -24,33 +26,34 @@ declare const electronAPI: {
   refreshUsageLimits: () => Promise<Array<{ agentName: string; providerUsage?: any }>>
 }
 
-function formatUptime(spawnedAt: string): string {
-  const ms = Date.now() - new Date(spawnedAt).getTime()
-  const mins = Math.floor(ms / 60000)
-  const hours = Math.floor(mins / 60)
-  if (hours > 0) return `${hours}h ${mins % 60}m`
-  return `${mins}m`
-}
-
 function UsageBar({ used, total, unit }: { used: number; total: number; unit: string }): React.ReactElement {
-  const pct = total > 0 ? Math.min((used / total) * 100, 100) : 0
-  const remaining = total - used
-  const color = pct > 90 ? '#f44336' : pct > 70 ? '#ffc107' : '#4caf50'
+  const u = usagePresentation(used, total, unit)
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
-        <span style={{ color: '#aaa' }}>
-          {unit === 'percent' ? `${Math.round(100 - pct)}% remaining` : `${remaining.toLocaleString()} / ${total.toLocaleString()} ${unit} left`}
+    <div className="cog-usage__bar">
+      <div className="cog-usage__barline">
+        <span>
+          {u.left}
+          {u.word && (
+            <span className={`cog-usage__level cog-tone-${u.tone}`}>
+              {' '}<Icon name="circle-alert" size={12} />{u.word}
+            </span>
+          )}
         </span>
-        <span style={{ color: '#666' }}>{Math.round(pct)}% used</span>
+        <span><span className="cog-mono">{Math.round(u.pct)}%</span> used</span>
       </div>
-      <div style={{ height: '6px', backgroundColor: '#333', borderRadius: '3px', overflow: 'hidden' }}>
-        <div style={{
-          height: '100%', width: `${pct}%`,
-          backgroundColor: color, borderRadius: '3px',
-          transition: 'width 0.3s'
-        }} />
+      <div
+        className="cog-meter"
+        role="meter"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={Math.round(u.pct)}
+        aria-label="Provider usage"
+      >
+        <div
+          className={u.tone ? `cog-meter__fill cog-meter__fill--${u.tone}` : 'cog-meter__fill'}
+          style={{ width: `${u.pct}%` }}
+        />
       </div>
     </div>
   )
@@ -79,34 +82,26 @@ export function UsagePanel(): React.ReactElement {
   }
 
   return (
-    <div style={{
-      height: '100%', display: 'flex', flexDirection: 'column',
-      backgroundColor: '#1e1e1e', color: '#e0e0e0', fontSize: '13px'
-    }}>
-      <div style={{
-        padding: '8px 12px', borderBottom: '1px solid #333',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
-      }}>
-        <span style={{ fontSize: '12px', color: '#888', fontWeight: 500 }}>Usage</span>
-        <button onClick={handleRefresh} disabled={refreshing} style={{
-          padding: '3px 10px', fontSize: '11px', borderRadius: '4px', cursor: 'pointer',
-          border: '1px solid #4a9eff', backgroundColor: '#1e3a5f', color: '#8cc4ff'
-        }}>{refreshing ? 'Checking...' : 'Refresh Limits'}</button>
-      </div>
+    <div className="cog-panel cog-usage">
+      <Toolbar
+        label="Usage"
+        actions={
+          <Button variant="ghost" onClick={handleRefresh} disabled={refreshing}>
+            <Icon name="refresh-cw" size={14} />{refreshing ? 'Checking…' : 'Refresh limits'}
+          </Button>
+        }
+      >
+        <span className="cog-toolbar__title"><Icon name="gauge" size={14} /><span>Usage</span></span>
+      </Toolbar>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div className="cog-panel__body">
         {metrics.length === 0 ? (
-          <div style={{ color: '#555', textAlign: 'center', padding: '20px 0' }}>
-            No agents running. Spawn agents to see usage.
-          </div>
+          <EmptyState icon="gauge">No agents running. Spawn agents to see usage.</EmptyState>
         ) : metrics.map(m => (
-          <div key={m.agentName} style={{
-            padding: '10px', backgroundColor: '#252525', borderRadius: '6px', border: '1px solid #333',
-            display: 'flex', flexDirection: 'column', gap: '6px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontWeight: 500, color: '#e0e0e0' }}>{m.agentName}</span>
-              <span style={{ fontSize: '10px', color: '#666' }}>{m.cli} {m.model}</span>
+          <section key={m.agentName} className="cog-usage__agent">
+            <div className="cog-usage__head">
+              <span className="cog-usage__name">{m.agentName}</span>
+              <span className="cog-usage__spec" title={`${m.cli} ${m.model}`}>{m.cli} {m.model}</span>
             </div>
 
             {m.providerUsage && m.providerUsage.total > 0 && m.providerUsage.unit !== 'unknown' && (
@@ -114,32 +109,29 @@ export function UsagePanel(): React.ReactElement {
             )}
 
             {m.providerUsage?.raw && (
-              <pre style={{
-                margin: 0, padding: '6px', backgroundColor: '#1a1a1a', borderRadius: '4px',
-                fontSize: '10px', color: '#888', whiteSpace: 'pre-wrap', maxHeight: '60px', overflow: 'auto'
-              }}>{m.providerUsage.raw}</pre>
+              <pre className="cog-pre">{m.providerUsage.raw}</pre>
             )}
 
             {!m.providerUsage && (
-              <div style={{ fontSize: '11px', color: '#555' }}>
-                Provider limits: click Refresh to check
+              <div className="cog-usage__hint">
+                Provider limits: click Refresh limits to check
               </div>
             )}
 
-            <div style={{ fontSize: '11px', color: '#888', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <span>{m.messagesSent} sent</span>
-              <span>{m.messagesReceived} recv</span>
-              <span>{m.tasksCompleted} tasks</span>
-              <span>{m.infoPosted} info</span>
-              <span>{formatUptime(m.spawnedAt)} active</span>
+            <div className="cog-usage__counts">
+              <span><b>{m.messagesSent}</b> sent</span>
+              <span><b>{m.messagesReceived}</b> received</span>
+              <span><b>{m.tasksCompleted}</b> tasks</span>
+              <span><b>{m.infoPosted}</b> info</span>
+              <span><b>{uptimeLabel(m.spawnedAt)}</b> active</span>
             </div>
-          </div>
+          </section>
         ))}
       </div>
 
       {lastRefreshed && (
-        <div style={{ padding: '4px 12px', borderTop: '1px solid #333', fontSize: '10px', color: '#555', textAlign: 'center' }}>
-          Last refreshed: {lastRefreshed}
+        <div className="cog-panel__foot">
+          Last refreshed <span className="cog-mono">{lastRefreshed}</span>
         </div>
       )}
     </div>

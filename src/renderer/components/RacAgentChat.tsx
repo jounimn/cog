@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { Button, Icon, Input, EmptyState, Toolbar } from '../ui'
 
 interface Message {
   id: string
@@ -53,76 +54,52 @@ export function RacAgentChat({ agentName }: RacAgentChatProps): React.ReactEleme
   )
 
   return (
-    <div style={{
-      height: '100%', display: 'flex', flexDirection: 'column',
-      backgroundColor: '#1e1e1e', color: '#e0e0e0', fontSize: '13px'
-    }}>
+    <div className="cog-panel cog-chat">
       {/* Header */}
-      <div style={{
-        padding: '8px 12px', borderBottom: '1px solid #333',
-        fontSize: '12px', color: '#888'
-      }}>
-        <span style={{ color: '#4a9eff' }}>{'\u25CF'}</span>{' '}
-        <span style={{ fontWeight: 500, color: '#e0e0e0' }}>{agentName}</span>
-        <span style={{ marginLeft: '8px', color: '#555' }}>Remote R.A.C. Agent</span>
-      </div>
+      <Toolbar label={`Chat with ${agentName}`}>
+        <span className="cog-toolbar__title">
+          <Icon name="bot" size={14} />
+          <span>{agentName} <span className="cog-toolbar__sub">Remote R.A.C. agent</span></span>
+        </span>
+      </Toolbar>
 
       {/* Messages */}
-      <div style={{
-        flex: 1, overflow: 'auto', padding: '8px',
-        display: 'flex', flexDirection: 'column', gap: '4px'
-      }}>
+      <div className="cog-chat__list">
         {sortedMessages.length === 0 ? (
-          <div style={{ color: '#555', textAlign: 'center', padding: '20px 0' }}>
+          <EmptyState icon="messages-square">
             No messages yet. Send a task to this agent below,{'\n'}
-            or have your orchestrator send_message("{agentName}", "...").
-          </div>
+            or have your orchestrator <span className="cog-mono">send_message("{agentName}", "...")</span>.
+          </EmptyState>
         ) : (
-          sortedMessages.map(msg => (
-            <div key={msg.id} style={{
-              padding: '6px 8px',
-              backgroundColor: msg.from === agentName ? '#1a2a3a' : '#252525',
-              borderRadius: '4px',
-              borderLeft: msg.from === agentName ? '3px solid #4a9eff' : '3px solid #4caf50'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                <span style={{
-                  fontSize: '11px', fontWeight: 500,
-                  color: msg.from === agentName ? '#4a9eff' : '#4caf50'
-                }}>
-                  {msg.from}
-                </span>
-                <span style={{ color: '#444', fontSize: '10px' }}>
-                  {new Date(msg.timestamp).toLocaleTimeString()}
-                </span>
+          sortedMessages.map(msg => {
+            const fromAgent = msg.from === agentName
+            return (
+              <div key={msg.id} className={fromAgent ? 'cog-chat__msg cog-chat__msg--agent' : 'cog-chat__msg'}>
+                <div className="cog-chat__head">
+                  <Icon name={fromAgent ? 'bot' : 'user'} size={13} />
+                  <span>{msg.from}</span>
+                  <span className="cog-chat__time">{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                </div>
+                {/* Agent output is data: mono and pre-wrap so ASCII alignment survives */}
+                <div className="cog-chat__body">{msg.message}</div>
               </div>
-              <div style={{ color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {msg.message}
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
 
       {/* Input */}
-      <div style={{
-        padding: '8px', borderTop: '1px solid #333',
-        display: 'flex', gap: '4px'
-      }}>
-        <input
+      <div className="cog-chat__input">
+        <Input
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-          placeholder={`Send message to ${agentName}...`}
-          style={{
-            flex: 1, backgroundColor: '#2a2a2a', border: '1px solid #444',
-            borderRadius: '4px', padding: '6px 8px', color: '#e0e0e0', fontSize: '12px'
-          }}
+          placeholder={`Send message to ${agentName}…`}
+          aria-label={`Message to ${agentName}`}
         />
-        <button onClick={handleSend} disabled={sending || !input.trim()} style={{
-          padding: '6px 12px', backgroundColor: '#2d5a2d', border: '1px solid #4caf50',
-          borderRadius: '4px', color: '#4caf50', cursor: 'pointer', fontSize: '11px'
-        }}>Send</button>
+        <Button onClick={handleSend} disabled={sending || !input.trim()}>
+          <Icon name="send" size={14} />Send
+        </Button>
       </div>
     </div>
   )
