@@ -93,7 +93,6 @@ export function ScheduleDialog({ open, mode, agents, initialValues, onSubmit, on
       title={mode === 'create' ? 'New scheduled prompt' : 'Edit scheduled prompt'}
       icon="calendar-clock"
       size="sm"
-      zIndex={1000}
       onClose={onClose}
       closeOnBackdrop
       footerStart={error ? <FieldError>{error}</FieldError> : undefined}

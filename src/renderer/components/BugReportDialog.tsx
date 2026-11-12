@@ -86,7 +86,7 @@ export function BugReportDialog({ onClose }: { onClose: () => void }): React.Rea
         <>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={!description.trim() || submitting}>
-            <Icon name="send" size={14} />{submitting ? 'Submitting...' : 'Submit Bug Report'}
+            <Icon name="send" size={14} />{submitting ? 'Submitting...' : 'Submit bug report'}
           </Button>
         </>
       }
@@ -117,7 +117,8 @@ export function BugReportDialog({ onClose }: { onClose: () => void }): React.Rea
 
       <div className="cog-bug__info">
         <span>Auto-collected info (included in report):</span>
-        <pre className="cog-pre">{systemInfo}</pre>
+        {/* Display only: the submitted body keeps the markdown bold. */}
+        <pre className="cog-pre">{systemInfo.replace(/\*\*/g, '')}</pre>
       </div>
 
       {submitResult && (

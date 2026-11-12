@@ -21,16 +21,24 @@ export function isScrolledToEnd(scrollTop: number, clientHeight: number, scrollH
 
 /**
  * The section to highlight in the list: the last one when the body is scrolled to its end
- * (a short last section never reaches the top band), else the first in order that is in
- * view, else the current one unchanged.
+ * (a short last section never reaches the top), else the one whose top is nearest the
+ * scrolling body's top (`tops` is each section's top minus the body's top, in px; a tie
+ * goes to the earlier section), else the current one unchanged.
  */
 export function pickActiveSection<T extends string>(
   order: readonly T[],
-  visible: ReadonlySet<string>,
+  tops: Readonly<Partial<Record<string, number>>>,
   current: T,
   atEnd = false
 ): T {
   if (atEnd && order.length > 0) return order[order.length - 1]
-  for (const id of order) if (visible.has(id)) return id
-  return current
+  let best: T | null = null
+  let bestDist = Infinity
+  for (const id of order) {
+    const top = tops[id]
+    if (top === undefined) continue
+    const dist = Math.abs(top)
+    if (dist < bestDist) { best = id; bestDist = dist }
+  }
+  return best ?? current
 }

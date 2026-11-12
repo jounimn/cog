@@ -385,7 +385,6 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
   // ---- Left list of sections: jumps within the one scrolling body ----
   const scrollRef = useRef<HTMLDivElement>(null)
   const sectionEls = useRef<Partial<Record<SettingsSectionId, HTMLElement | null>>>({})
-  const visibleSections = useRef(new Set<string>())
   // Set by a click in the list until the user scrolls by hand, so a short section
   // the jump cannot bring to the top stays highlighted.
   const navLock = useRef(false)
@@ -395,28 +394,17 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
     const root = scrollRef.current
     if (!root || navLock.current) return
     const atEnd = isScrolledToEnd(root.scrollTop, root.clientHeight, root.scrollHeight)
-    setActiveSection(cur => pickActiveSection(SETTINGS_SECTION_ORDER, visibleSections.current, cur, atEnd))
-  }, [])
-
-  useEffect(() => {
-    const root = scrollRef.current
-    if (!root || typeof IntersectionObserver === 'undefined') return
-    // In view = overlapping the top 40% of the scrolling body.
-    const io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        const id = (e.target as HTMLElement).dataset.settingsSection
-        if (!id) continue
-        if (e.isIntersecting) visibleSections.current.add(id)
-        else visibleSections.current.delete(id)
-      }
-      recomputeActive()
-    }, { root, rootMargin: '0px 0px -60% 0px', threshold: 0 })
+    // Each section's top relative to the body's top: the nearest one is what is being read.
+    const rootTop = root.getBoundingClientRect().top
+    const tops: Partial<Record<string, number>> = {}
     for (const id of SETTINGS_SECTION_ORDER) {
       const el = sectionEls.current[id]
-      if (el) io.observe(el)
+      if (el) tops[id] = el.getBoundingClientRect().top - rootTop
     }
-    return () => io.disconnect()
-  }, [recomputeActive])
+    setActiveSection(cur => pickActiveSection(SETTINGS_SECTION_ORDER, tops, cur, atEnd))
+  }, [])
+
+  useEffect(() => { recomputeActive() }, [recomputeActive])
 
   const jumpTo = (id: SettingsSectionId) => {
     navLock.current = true
@@ -444,6 +432,7 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
             key={s.id}
             title={s.label}
             selected={activeSection === s.id}
+            current={activeSection === s.id}
             onClick={() => jumpTo(s.id)}
           />
         ))}
@@ -457,6 +446,7 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
         onPointerDown={releaseNavLock}
         onTouchStart={releaseNavLock}
         onKeyDown={releaseNavLock}
+        onFocus={releaseNavLock}
       >
         {/* Notifications section */}
         <section ref={sectionRef('notifications')} data-settings-section="notifications" className="cog-settings__section">
@@ -718,7 +708,7 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
         {/* Remote View section */}
         <section ref={sectionRef('remote')} data-settings-section="remote" className="cog-settings__section">
           <SectionHeader>
-            Remote view <span className="cog-settings__exp cog-tone-warning">(experimental)</span>
+            Remote view <span className="cog-settings__exp">(experimental)</span>
           </SectionHeader>
 
           <SettingCheck
@@ -1078,7 +1068,7 @@ function TelegramSection(): React.ReactElement {
   return (
     <>
       <SectionHeader>
-        Telegram bot <span className="cog-settings__exp cog-tone-warning">(experimental)</span>
+        Telegram bot <span className="cog-settings__exp">(experimental)</span>
       </SectionHeader>
       <p className="cog-settings__intro">
         Drive your agents from your phone: <span className="cog-mono">/status</span>, <span className="cog-mono">/use</span>, <span className="cog-mono">/msg</span>, <span className="cog-mono">/output</span>, <span className="cog-mono">/task</span> — and agent replies
@@ -1186,6 +1176,7 @@ function TelegramSection(): React.ReactElement {
       {/* Multi-instance guidance + optional supergroup setup */}
       <details className="cog-settings__details">
         <summary>
+          <span className="cog-settings__chev"><Icon name="chevron-right" size={14} /></span>
           Running multiple Cogs on one bot? (read this)
         </summary>
         <div className="cog-settings__detailsbody">

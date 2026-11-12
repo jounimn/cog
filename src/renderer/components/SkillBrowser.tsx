@@ -67,6 +67,7 @@ export function SkillBrowser({ selectedIds, onToggleSkill, onClose }: SkillBrows
       title="Skills browser"
       icon="book-open"
       size="md"
+      backdrop="none"
       onClose={onClose}
       bodyClassName="cog-skills"
       footerStart={

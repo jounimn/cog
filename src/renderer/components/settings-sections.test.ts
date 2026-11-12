@@ -28,16 +28,23 @@ describe('isScrolledToEnd', () => {
 
 describe('pickActiveSection', () => {
   const order = ['a', 'b', 'c'] as const
-  it('picks the first visible section in order, not in set order', () => {
-    expect(pickActiveSection(order, new Set(['c', 'b']), 'a')).toBe('b')
+  it('picks the section whose top is nearest the body top', () => {
+    expect(pickActiveSection(order, { a: -600, b: 40, c: 700 }, 'a')).toBe('b')
+    expect(pickActiveSection(order, { a: -30, b: 300, c: 900 }, 'c')).toBe('a')
   })
-  it('keeps the current section when none is in view', () => {
-    expect(pickActiveSection(order, new Set(), 'b')).toBe('b')
+  it('does not lag: a section just below the top beats a long one that started far above', () => {
+    expect(pickActiveSection(order, { a: -900, b: 120, c: 800 }, 'a')).toBe('b')
+  })
+  it('gives a tie to the earlier section', () => {
+    expect(pickActiveSection(order, { a: -50, b: 50 }, 'c')).toBe('a')
+  })
+  it('keeps the current section when no section was measured', () => {
+    expect(pickActiveSection(order, {}, 'b')).toBe('b')
   })
   it('ignores ids that are not sections', () => {
-    expect(pickActiveSection(order, new Set(['x']), 'c')).toBe('c')
+    expect(pickActiveSection(order, { x: 0 }, 'c')).toBe('c')
   })
   it('picks the last section at the end of the scroll', () => {
-    expect(pickActiveSection(order, new Set(['a', 'b']), 'a', true)).toBe('c')
+    expect(pickActiveSection(order, { a: 0, b: 300 }, 'a', true)).toBe('c')
   })
 })

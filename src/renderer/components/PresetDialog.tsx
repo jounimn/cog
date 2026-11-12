@@ -900,7 +900,6 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
             : `Load Preset: ${selectedPreset}`}
         icon="folder-open"
         size="sm"
-        zIndex={10000}
         footer={
           <>
             <Button variant="ghost" onClick={() => setShowCwdPrompt(false)}>Back</Button>
@@ -974,7 +973,7 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
         icon="bookmark"
         size="lg"
         className="cog-presets"
-        zIndex={10000}
+        bodyClassName="cog-presets__body"
         onClose={onClose}
         footerStart={footerStart}
         footer={footer}
@@ -1310,7 +1309,7 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
           icon="star"
           size="md"
           className="cog-presets"
-          zIndex={10001}
+          zIndex={100002}
           onClose={closeShareIfIdle}
           closeOnBackdrop
           footer={

@@ -1,7 +1,8 @@
-import React, { useEffect, useId } from 'react'
+import React, { useEffect, useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon, type IconName } from './Icon'
 import { Button } from './Button'
+import { openDialog, isTopDialog } from './dialog-stack'
 
 export type DialogSize = 'sm' | 'md' | 'lg'
 
@@ -27,6 +28,8 @@ export interface DialogProps {
   zIndex?: number
   /** Opaque --canvas ground instead of the 70% veil (the full-screen project picker). */
   opaque?: boolean
+  /** 'none': a transparent backdrop, for a dialog opened over another one, so there is one dim, not two. */
+  backdrop?: 'veil' | 'none'
   bodyClassName?: string
   className?: string
   children?: React.ReactNode
@@ -35,17 +38,22 @@ export interface DialogProps {
 /** The dialog shell: backdrop, plate, 44px header, scrolling body, fixed footer. */
 export function Dialog({
   title, icon, size = 'md', onClose, footer, footerStart, headerExtra,
-  closeOnBackdrop = false, closeOnEscape = false, onSubmit, zIndex, opaque,
+  closeOnBackdrop = false, closeOnEscape = false, onSubmit, zIndex, opaque, backdrop = 'veil',
   bodyClassName, className, children
 }: DialogProps): React.ReactElement {
   const titleId = useId()
+  const stackId = useRef(Symbol('dialog')).current
+
+  useEffect(() => openDialog(stackId), [stackId])
 
   useEffect(() => {
     if (!closeOnEscape || !onClose) return
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && isTopDialog(stackId)) onClose()
+    }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [closeOnEscape, onClose])
+  }, [closeOnEscape, onClose, stackId])
 
   const plateCls = ['cog-dialog', `cog-dialog--${size}`, className].filter(Boolean).join(' ')
   const inner = (
@@ -76,7 +84,11 @@ export function Dialog({
   // resolves against a transformed ancestor). React events still bubble to the owner.
   return createPortal(
     <div
-      className={opaque ? 'cog-modal-backdrop cog-modal-backdrop--opaque' : 'cog-modal-backdrop'}
+      className={[
+        'cog-modal-backdrop',
+        opaque && 'cog-modal-backdrop--opaque',
+        backdrop === 'none' && 'cog-modal-backdrop--none'
+      ].filter(Boolean).join(' ')}
       style={zIndex !== undefined ? { zIndex } : undefined}
       onClick={closeOnBackdrop && onClose ? (e) => { if (e.target === e.currentTarget) onClose() } : undefined}
     >

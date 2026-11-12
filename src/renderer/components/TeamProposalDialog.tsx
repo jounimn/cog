@@ -119,7 +119,6 @@ export function TeamProposalDialog({ proposal, activeTabId, onClose, onApproved 
       icon="users"
       size="lg"
       className="cog-proposal"
-      zIndex={10000}
       onClose={closeIfIdle}
       closeOnBackdrop
       footerStart={

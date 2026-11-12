@@ -15,6 +15,8 @@ export interface RowProps {
   selected?: boolean
   /** For a row that toggles a disclosure: sets aria-expanded, and `selected` stays visual only (no aria-pressed). */
   expanded?: boolean
+  /** For a row in a list of places (a section list): the current one gets aria-current="true", and `selected` stays visual only. */
+  current?: boolean
   /** Accessible name when the visible title alone does not carry the row's state. */
   ariaLabel?: string
   onClick?: () => void
@@ -25,7 +27,7 @@ export interface RowProps {
 
 /** The list row from the Pinboard audition: icon, mono id, ellipsed title, a subtle second line. */
 export function Row({
-  icon, id, title, meta, state, actions, selected, expanded, ariaLabel, onClick, tooltip, className
+  icon, id, title, meta, state, actions, selected, expanded, current, ariaLabel, onClick, tooltip, className
 }: RowProps): React.ReactElement {
   const cls = [
     'cog-row',
@@ -41,7 +43,8 @@ export function Row({
       onClick={onClick}
       role={interactive ? 'button' : undefined}
       tabIndex={interactive ? 0 : undefined}
-      aria-pressed={interactive && expanded === undefined && selected !== undefined ? selected : undefined}
+      aria-pressed={interactive && expanded === undefined && current === undefined && selected !== undefined ? selected : undefined}
+      aria-current={current ? 'true' : undefined}
       aria-expanded={interactive ? expanded : undefined}
       aria-label={ariaLabel}
       onKeyDown={interactive ? (e) => {

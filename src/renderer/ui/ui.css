@@ -16,9 +16,13 @@
 .cog-btn[aria-pressed="true"] { background: rgb(var(--surface-muted)); color: rgb(var(--ink)); border-color: rgb(var(--line-strong)); }
 
 /* Inside a panel the default button is the filled one: the panel's single primary action. Everything else is ghost. */
-.cog-panel .cog-btn--default:not(.cog-btn--ghost) { background: rgb(var(--surface-muted)); color: rgb(var(--ink)); border-color: rgb(var(--line-strong)); }
-.cog-panel .cog-btn--default:not(.cog-btn--ghost):hover { background: rgb(var(--line)); border-color: rgb(var(--steel)); }
-.cog-panel .cog-btn--default:not(.cog-btn--ghost):disabled { background: transparent; color: rgb(var(--ink-muted)); border-color: rgb(var(--line)); }
+/* The dialog footer's single primary is the same button: one default-button look everywhere. */
+.cog-panel .cog-btn--default:not(.cog-btn--ghost),
+.cog-dialog__foot .cog-btn--default { background: rgb(var(--surface-muted)); color: rgb(var(--ink)); border-color: rgb(var(--line-strong)); }
+.cog-panel .cog-btn--default:not(.cog-btn--ghost):hover,
+.cog-dialog__foot .cog-btn--default:hover { background: rgb(var(--line)); border-color: rgb(var(--steel)); }
+.cog-panel .cog-btn--default:not(.cog-btn--ghost):disabled,
+.cog-dialog__foot .cog-btn--default:disabled { background: transparent; color: rgb(var(--ink-muted)); border-color: rgb(var(--line)); }
 
 .cog-btn--ghost { border-color: transparent; }
 .cog-btn--ghost:hover { border-color: rgb(var(--line)); }
@@ -677,6 +681,7 @@
 /* ---------- Dialog shell (ui/Dialog) ---------- */
 .cog-modal-backdrop { position: fixed; inset: 0; z-index: 100001; display: flex; align-items: center; justify-content: center; background: rgb(var(--canvas) / 0.7); }
 .cog-modal-backdrop--opaque { background: rgb(var(--canvas)); }
+.cog-modal-backdrop--none { background: transparent; }
 @keyframes cog-dialog-in { from { opacity: 0; } to { opacity: 1; } }
 .cog-dialog {
   position: relative; display: flex; flex-direction: column; box-sizing: border-box;
@@ -697,7 +702,7 @@
 .cog-dialog__title { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.2 var(--font-text); color: rgb(var(--ink)); }
 .cog-dialog__title-sub { font-weight: 400; color: rgb(var(--ink-muted)); }
 .cog-dialog__extra { flex: none; font: 400 12px/1 var(--font-mono); color: rgb(var(--ink-subtle)); }
-.cog-dialog__body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.cog-dialog__body { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 12px; padding: 16px; }
 .cog-dialog__foot {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-shrink: 0;
   padding: 10px 16px; border-top: 1px solid rgb(var(--line));
@@ -705,10 +710,7 @@
 .cog-dialog__foot-start { display: flex; align-items: center; gap: 6px; min-width: 0; font: 400 12px/1.3 var(--font-text); color: rgb(var(--ink-subtle)); }
 .cog-dialog__foot-end { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .cog-dialog .cog-btn > svg { flex: none; }
-/* The dialog's single primary: the default button, filled in steel. Never --hint. */
-.cog-dialog__foot .cog-btn--default { background: rgb(var(--surface-muted)); color: rgb(var(--ink)); border-color: rgb(var(--line-strong)); }
-.cog-dialog__foot .cog-btn--default:hover { background: rgb(var(--line)); border-color: rgb(var(--steel)); }
-.cog-dialog__foot .cog-btn--default:disabled { background: transparent; color: rgb(var(--ink-muted)); border-color: rgb(var(--line)); }
+/* The dialog's single primary is the panel's filled default button (see Button above). Never --hint. */
 .cog-dialog .cog-input, .cog-dialog .cog-select { width: 100%; }
 .cog-dialog .cog-input { border-color: rgb(var(--line-strong)); }
 .cog-dialog .cog-input:hover { border-color: rgb(var(--steel)); }
@@ -740,6 +742,8 @@
 .cog-agentform__skills { display: flex; flex-direction: column; gap: 6px; }
 .cog-agentform__skills .cog-dialog__list { max-height: 160px; }
 .cog-agentform__skills > .cog-btn { align-self: flex-start; }
+/* Ghost: its icon sits on the field's left edge, in line with the label above (padding 10 + border 1). */
+.cog-agentform__skills > .cog-agentform__addskills { margin-left: -11px; }
 .cog-agentform__note { margin: 0; font: 400 12px/1.45 var(--font-text); }
 .cog-agentform__notes { resize: vertical; }
 .cog-agentform__advanced { align-self: flex-start; margin-left: -4px; }
@@ -762,13 +766,15 @@
 .cog-picker__open { align-self: flex-start; }
 .cog-picker__recent { display: flex; flex-direction: column; gap: 6px; }
 .cog-picker__list { max-height: 360px; }
+/* Long paths lose their head, not their tail: rtl puts the ellipsis on the left; <bdi> keeps the path itself ltr. */
+.cog-picker__path { direction: rtl; text-align: left; }
 
 /* Bug report */
 .cog-bug__text { resize: vertical; }
 .cog-bug__info { display: flex; flex-direction: column; gap: 4px; font: 500 12px/1.2 var(--font-text); color: rgb(var(--ink-muted)); }
 .cog-bug__info .cog-pre { max-height: 140px; font-size: 12px; color: rgb(var(--ink-subtle)); }
 .cog-bug__result { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid currentColor; border-radius: var(--r); font: 400 12px/1.3 var(--font-text); }
-.cog-bug__thanks { margin: 0; text-align: center; font: 400 12px/1.3 var(--font-text); color: rgb(var(--ink-subtle)); }
+.cog-bug__thanks { margin: 0; text-align: left; font: 400 12px/1.3 var(--font-text); color: rgb(var(--ink-subtle)); }
 
 /* Help (MCP tools reference): a reading page */
 .cog-help .cog-dialog__body { gap: 20px; padding-top: 0; }
@@ -879,7 +885,7 @@
   margin: 0 -16px; padding: 2px 6px 2px 16px;
   border-top: 1px solid rgb(var(--line)); border-bottom: 1px solid rgb(var(--line));
 }
-.cog-settings__exp { font-weight: 400; }
+.cog-settings__exp { font-weight: 400; color: rgb(var(--ink-subtle)); }
 .cog-settings__sub { margin: 4px 0 0; font: 600 12px/1.2 var(--font-text); color: rgb(var(--ink-muted)); }
 .cog-settings__intro { margin: 0; font: 400 12px/1.5 var(--font-text); color: rgb(var(--ink-subtle)); }
 .cog-settings__intro .cog-mono { font-size: 12px; color: rgb(var(--ink-muted)); }
@@ -959,7 +965,10 @@
 .cog-settings__code { padding: 4px 10px; border-radius: var(--r); background: rgb(var(--success) / 0.1); font: 500 18px/1 var(--font-mono); letter-spacing: 3px; color: rgb(var(--success)); }
 .cog-settings__help .cog-mono { font-size: 12px; }
 .cog-settings__details { padding: 8px 10px; background: rgb(var(--surface-sunk)); border: 1px solid rgb(var(--line)); border-radius: var(--r); font: 400 12px/1.5 var(--font-text); color: rgb(var(--ink-muted)); }
-.cog-settings__details summary { cursor: pointer; font-weight: 600; color: rgb(var(--ink)); }
+.cog-settings__details summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; font: 600 13px/1.3 var(--font-text); color: rgb(var(--ink)); }
+.cog-settings__details summary::-webkit-details-marker { display: none; }
+.cog-settings__chev { display: inline-flex; flex: none; color: rgb(var(--ink-muted)); transition: transform var(--dur) var(--ease-out); }
+.cog-settings__details[open] .cog-settings__chev { transform: rotate(90deg); }
 .cog-settings__details summary:focus-visible { outline: 2px solid rgb(var(--focus)); outline-offset: 2px; }
 .cog-settings__details b { font-weight: 600; color: rgb(var(--ink)); }
 .cog-settings__details code, .cog-settings__details .cog-mono { font-family: var(--font-mono); font-size: 12px; }
@@ -1016,6 +1025,8 @@
 .cog-toast .cog-note { margin-bottom: 8px; }
 
 /* ---------- Presets: tabs, lists as rows, agent cards, community teams ---------- */
+/* A stable height across tabs, so switching tabs does not resize the dialog (85vh plate minus head and foot). */
+.cog-dialog__body.cog-presets__body { min-height: min(520px, calc(85vh - 96px)); }
 .cog-presets .cog-seg { align-self: flex-start; flex-wrap: wrap; }
 .cog-presets .cog-empty { height: auto; padding: 32px 16px; }
 .cog-presets .cog-empty--compact { padding: 8px 12px; }

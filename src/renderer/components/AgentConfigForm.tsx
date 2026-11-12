@@ -391,8 +391,8 @@ export function AgentConfigForm({ value, onChange, errors, hideSpawnAsleep }: Ag
             ))}
           </div>
         )}
-        <Button variant="ghost" onClick={() => setShowSkillBrowser(true)}>
-          <Icon name="plus" size={14} />Add Skills
+        <Button variant="ghost" className="cog-agentform__addskills" onClick={() => setShowSkillBrowser(true)}>
+          <Icon name="plus" size={14} />Add skills
         </Button>
       </div>
 

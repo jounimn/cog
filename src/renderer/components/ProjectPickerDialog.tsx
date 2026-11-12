@@ -41,12 +41,11 @@ export function ProjectPickerDialog({ isFullScreen, onProjectOpened, onCancel }:
       title={isFullScreen ? 'Open a project' : 'Switch project'}
       icon="folder-open"
       size="sm"
-      zIndex={9999}
       opaque={isFullScreen}
       onClose={onCancel}
     >
       <Button variant="ghost" className="cog-picker__open" onClick={handleOpenFolder} disabled={loading}>
-        <Icon name="folder-open" size={14} />Open Folder...
+        <Icon name="folder-open" size={14} />Open folder…
       </Button>
 
       {recent.length > 0 && (
@@ -65,7 +64,7 @@ export function ProjectPickerDialog({ isFullScreen, onProjectOpened, onCancel }:
                 <span className="cog-row__icon"><Icon name="folder" size={14} /></span>
                 <span className="cog-row__title">{project.name}</span>
                 <span className="cog-row__line2">
-                  <span className="cog-row__meta">{project.path}</span>
+                  <span className="cog-row__meta cog-picker__path"><bdi>{project.path}</bdi></span>
                 </span>
               </button>
             ))}
