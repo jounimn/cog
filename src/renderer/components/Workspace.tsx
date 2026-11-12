@@ -12,7 +12,7 @@ import { visibleRange } from '../ruler'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import type { SnapBounds, SnapZoneInfo, WindowBounds } from '../hooks/useSnapZones'
-import { clientToCanvas } from '../canvas-math'
+import { clientToCanvas, headerScale } from '../canvas-math'
 import { useAppearance } from '../appearance-store'
 import { resolveAppearance } from '../terminal-appearance'
 import { getPanelType } from '../panel-ids'
@@ -381,8 +381,10 @@ export function Workspace({
           transition: transitionEnabled ? 'transform 0.2s ease' : 'none',
           position: 'absolute',
           top: 0,
-          left: 0
-        }}
+          left: 0,
+          // Plate headers counter-scale below 0.75 so they stay readable (see headerScale)
+          ['--plate-ui' as string]: headerScale(zoom)
+        } as React.CSSProperties}
       >
         <LinkOverlay
           links={links}

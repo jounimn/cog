@@ -9,7 +9,26 @@ import type { Bounds } from './window-layout'
 
 export const MIN_ZOOM = 0.25
 export const MAX_ZOOM = 2.0
-const FIT_PADDING = 60
+
+/**
+ * Room "fit" keeps clear around the framed windows, in screen px: a 64px margin on
+ * each side, and a 180px band at the bottom for the zoom bar and the minimap.
+ */
+export interface Insets { top: number; right: number; bottom: number; left: number }
+export const FIT_INSETS: Insets = { top: 64, right: 64, bottom: 180, left: 64 }
+
+/** Below this zoom the plate header stops shrinking on screen. */
+export const HEADER_ZOOM_FLOOR = 0.75
+const HEADER_SCALE_MAX = 1 / 0.3
+
+/**
+ * Counter-scale for plate headers so they stay readable when zoomed out: 1 at or
+ * above 0.75, otherwise 0.75 / zoom (the on-screen size it has at 0.75), capped.
+ */
+export function headerScale(zoom: number): number {
+  if (!(zoom > 0) || zoom >= HEADER_ZOOM_FLOOR) return 1
+  return Math.min(HEADER_ZOOM_FLOOR / zoom, HEADER_SCALE_MAX)
+}
 
 export interface Viewport {
   zoom: number
@@ -22,12 +41,17 @@ export function clampZoom(level: number): number {
 }
 
 /**
- * Viewport that frames every window in `windows` inside a viewport of the given
- * size, centred, with a little padding. Zooms out as far as needed but never in
- * past 1:1 — a lone window should be readable, not blown up. Null when there is
- * nothing to frame.
+ * Viewport that frames every window in `windows` inside the given viewport minus
+ * `insets` (screen px), centred in what is left. Zooms out as far as needed but
+ * never in past 1:1 — a lone window should be readable, not blown up. Null when
+ * there is nothing to frame.
  */
-export function fitViewport(windows: Bounds[], viewportWidth: number, viewportHeight: number): Viewport | null {
+export function fitViewport(
+  windows: Bounds[],
+  viewportWidth: number,
+  viewportHeight: number,
+  insets: Insets = FIT_INSETS
+): Viewport | null {
   if (windows.length === 0) return null
 
   const minX = Math.min(...windows.map(w => w.x))
@@ -35,10 +59,13 @@ export function fitViewport(windows: Bounds[], viewportWidth: number, viewportHe
   const maxX = Math.max(...windows.map(w => w.x + w.width))
   const maxY = Math.max(...windows.map(w => w.y + w.height))
 
+  const availW = Math.max(1, viewportWidth - insets.left - insets.right)
+  const availH = Math.max(1, viewportHeight - insets.top - insets.bottom)
+
   const zoom = clampZoom(Math.min(
     1,
-    viewportWidth / (maxX - minX + FIT_PADDING),
-    viewportHeight / (maxY - minY + FIT_PADDING)
+    availW / Math.max(1, maxX - minX),
+    availH / Math.max(1, maxY - minY)
   ))
 
   const centerX = (minX + maxX) / 2
@@ -46,8 +73,8 @@ export function fitViewport(windows: Bounds[], viewportWidth: number, viewportHe
 
   return {
     zoom,
-    panX: viewportWidth / 2 - centerX * zoom,
-    panY: viewportHeight / 2 - centerY * zoom
+    panX: insets.left + availW / 2 - centerX * zoom,
+    panY: insets.top + availH / 2 - centerY * zoom
   }
 }
 
