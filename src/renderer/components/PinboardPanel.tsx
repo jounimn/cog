@@ -1,210 +1,79 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import type { PinboardTask } from '../../shared/types'
 import { useContainCanvasScroll } from '../hooks/useContainCanvasScroll'
+import { Button, Icon, Menu, MenuItem, MenuSeparator, EmptyState, Row, Toolbar, SectionHeader } from '../ui'
+import {
+  TASK_STATUS_ORDER, taskStatusPresentation, taskPriorityPresentation, shortTaskId, clip, snoozeCountdown
+} from '../panel-present'
 
-const PRIORITY_COLORS: Record<PinboardTask['priority'], string> = {
-  high: '#ef4444',
-  medium: '#eab308',
-  low: '#22c55e'
-}
-
-const COLUMN_CONFIG: { key: PinboardTask['status']; label: string; accent: string }[] = [
-  { key: 'open', label: 'Open', accent: '#3b82f6' },
-  { key: 'in_progress', label: 'In Progress', accent: '#eab308' },
-  { key: 'completed', label: 'Completed', accent: '#22c55e' }
-]
-
-const STATUS_LABELS: Record<PinboardTask['status'], string> = {
-  open: 'Open',
-  in_progress: 'In Progress',
-  completed: 'Completed'
-}
-
-function TaskCard({ task, onClick }: { task: PinboardTask; onClick: () => void }) {
-  const desc = task.description.length > 120
-    ? task.description.slice(0, 120) + '...'
-    : task.description
-
+function TaskRow({ task, onClick }: { task: PinboardTask; onClick: () => void }): React.ReactElement {
+  const st = taskStatusPresentation(task.status)
+  const pr = taskPriorityPresentation(task.priority)
+  // The list shows the audition row; the description and result previews ride in the tooltip.
+  const tooltip = [
+    task.title,
+    task.description && clip(task.description, 120),
+    task.result && `Result: ${clip(task.result, 80)}`
+  ].filter(Boolean).join('\n\n')
   return (
-    <div
+    <Row
       onClick={onClick}
-      style={{
-        backgroundColor: '#2a2a2a',
-        border: '1px solid #333',
-        borderRadius: '4px',
-        padding: '8px 10px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '4px',
-        cursor: 'pointer'
-      }}
-      onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = '#555' }}
-      onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = '#333' }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <span style={{
-          width: '8px', height: '8px', borderRadius: '50%',
-          backgroundColor: PRIORITY_COLORS[task.priority],
-          flexShrink: 0
-        }} />
-        <span style={{ color: '#e0e0e0', fontSize: '12px', fontWeight: 600, lineHeight: '1.3' }}>
-          {task.title}
+      tooltip={tooltip}
+      icon={<span className={`cog-tone-${st.tone}`}><Icon name={st.icon} size={15} /></span>}
+      id={shortTaskId(task.id)}
+      title={task.title}
+      meta={
+        <span className="cog-pin__meta">
+          {task.claimedBy && <span className="cog-pin__owner">{task.claimedBy}</span>}
+          <span className={pr.tone ? `cog-tone-${pr.tone}` : undefined}>{pr.word} priority</span>
         </span>
-      </div>
-
-      {task.claimedBy && (
-        <span style={{
-          color: '#888', fontSize: '10px',
-          padding: '1px 6px', backgroundColor: '#333', borderRadius: '3px',
-          alignSelf: 'flex-start'
-        }}>
-          {task.claimedBy}
-        </span>
-      )}
-
-      <span style={{ color: '#999', fontSize: '11px', lineHeight: '1.4' }}>
-        {desc}
-      </span>
-
-      {task.result && (
-        <span style={{
-          color: '#6ee7b7', fontSize: '10px', lineHeight: '1.3',
-          borderTop: '1px solid #333', paddingTop: '4px', marginTop: '2px'
-        }}>
-          {task.result.length > 80 ? task.result.slice(0, 80) + '...' : task.result}
-        </span>
-      )}
-    </div>
+      }
+      state={<span className={`cog-tone-${st.tone}`}>{st.word}</span>}
+    />
   )
 }
 
-function TaskDetail({ task, onBack }: { task: PinboardTask; onBack: () => void }) {
-  const statusColor = COLUMN_CONFIG.find(c => c.key === task.status)?.accent ?? '#888'
+function TaskDetail({ task, onBack }: { task: PinboardTask; onBack: () => void }): React.ReactElement {
+  const st = taskStatusPresentation(task.status)
+  const pr = taskPriorityPresentation(task.priority)
   const attachWheelGuard = useContainCanvasScroll<HTMLDivElement>()
 
   return (
-    <div ref={attachWheelGuard} style={{
-      width: '100%', height: '100%',
-      backgroundColor: '#1a1a1a',
-      fontFamily: 'monospace',
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden'
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: '10px 12px',
-        borderBottom: '1px solid #333',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        flexShrink: 0
-      }}>
-        <button
-          onClick={onBack}
-          style={{
-            background: 'none', border: '1px solid #444', borderRadius: '4px',
-            color: '#aaa', fontSize: '11px', cursor: 'pointer', padding: '2px 8px',
-            fontFamily: 'monospace'
-          }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#666' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = '#444' }}
-        >
-          ← Back
-        </button>
-        <span style={{
-          width: '8px', height: '8px', borderRadius: '50%',
-          backgroundColor: PRIORITY_COLORS[task.priority],
-          flexShrink: 0
-        }} />
-        <span style={{ color: '#e0e0e0', fontSize: '13px', fontWeight: 600, flex: 1 }}>
-          {task.title}
-        </span>
-        <span style={{
-          color: statusColor, fontSize: '10px', fontWeight: 600,
-          padding: '2px 8px', border: `1px solid ${statusColor}`,
-          borderRadius: '3px', textTransform: 'uppercase'
-        }}>
-          {STATUS_LABELS[task.status]}
+    <div ref={attachWheelGuard} className="cog-panel cog-pin">
+      <div className="cog-pin-detail__head">
+        <Button variant="ghost" onClick={onBack}>
+          <Icon name="arrow-left" size={15} />Back
+        </Button>
+        <h2 className="cog-pin-detail__title" title={task.title}>{task.title}</h2>
+        <span className={`cog-pin-detail__state cog-tone-${st.tone}`}>
+          <Icon name={st.icon} size={14} />{st.word}
         </span>
       </div>
 
-      {/* Body */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '12px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px'
-      }}>
-        {/* Meta row */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', fontSize: '11px' }}>
-          <div>
-            <span style={{ color: '#666' }}>Priority: </span>
-            <span style={{ color: PRIORITY_COLORS[task.priority] }}>{task.priority}</span>
-          </div>
-          {task.createdBy && (
-            <div>
-              <span style={{ color: '#666' }}>Created by: </span>
-              <span style={{ color: '#aaa' }}>{task.createdBy}</span>
-            </div>
-          )}
-          {task.claimedBy && (
-            <div>
-              <span style={{ color: '#666' }}>Claimed by: </span>
-              <span style={{ color: '#aaa' }}>{task.claimedBy}</span>
-            </div>
-          )}
-          <div>
-            <span style={{ color: '#666' }}>Created: </span>
-            <span style={{ color: '#aaa' }}>
-              {new Date(task.createdAt).toLocaleString()}
-            </span>
-          </div>
-          {task.targetRole && (
-            <div>
-              <span style={{ color: '#666' }}>Target role: </span>
-              <span style={{ color: '#aaa' }}>{task.targetRole}</span>
-            </div>
-          )}
-        </div>
+      <div className="cog-pin-detail__body">
+        <dl className="cog-facts">
+          <dt>Priority</dt>
+          <dd className={pr.tone ? `cog-tone-${pr.tone}` : undefined}>{pr.word}</dd>
+          {task.createdBy && (<><dt>Created by</dt><dd>{task.createdBy}</dd></>)}
+          {task.claimedBy && (<><dt>Claimed by</dt><dd>{task.claimedBy}</dd></>)}
+          <dt>Created</dt>
+          <dd className="cog-mono">{new Date(task.createdAt).toLocaleString()}</dd>
+          {task.targetRole && (<><dt>Target role</dt><dd>{task.targetRole}</dd></>)}
+        </dl>
 
-        {/* Description */}
-        <div>
-          <div style={{ color: '#666', fontSize: '10px', textTransform: 'uppercase', marginBottom: '4px' }}>
-            Description
-          </div>
-          <div style={{
-            color: '#ccc', fontSize: '12px', lineHeight: '1.5',
-            backgroundColor: '#222', borderRadius: '4px', padding: '10px',
-            whiteSpace: 'pre-wrap', wordBreak: 'break-word'
-          }}>
-            {task.description || '(none)'}
-          </div>
-        </div>
+        <section className="cog-block">
+          <h3 className="cog-block__title">Description</h3>
+          <div className="cog-block__text">{task.description || '(none)'}</div>
+        </section>
 
-        {/* Result */}
         {task.result && (
-          <div>
-            <div style={{ color: '#666', fontSize: '10px', textTransform: 'uppercase', marginBottom: '4px' }}>
-              Result
-            </div>
-            <div style={{
-              color: '#6ee7b7', fontSize: '12px', lineHeight: '1.5',
-              backgroundColor: '#1a2e1a', border: '1px solid #2a3e2a',
-              borderRadius: '4px', padding: '10px',
-              whiteSpace: 'pre-wrap', wordBreak: 'break-word'
-            }}>
-              {task.result}
-            </div>
-          </div>
+          <section className="cog-block">
+            <h3 className="cog-block__title">Result</h3>
+            <div className="cog-block__text cog-block__text--success">{task.result}</div>
+          </section>
         )}
 
-        {/* Task ID */}
-        <div style={{ fontSize: '10px', color: '#444', marginTop: 'auto' }}>
-          ID: {task.id}
-        </div>
+        <div className="cog-pin-detail__id">ID: {task.id}</div>
       </div>
     </div>
   )
@@ -226,10 +95,11 @@ const SNOOZE_OPTIONS: { label: string; ms: number }[] = [
   { label: '8 hours', ms: 8 * 60 * 60 * 1000 }
 ]
 
-function SnoozeControl() {
+function SnoozeControl(): React.ReactElement {
   const [muteUntil, setMuteUntil] = useState<number | null>(null)
   const [open, setOpen] = useState(false)
   const [now, setNow] = useState(Date.now())
+  const anchorRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     window.electronAPI.getStaleAlertSnooze().then(s => setMuteUntil(s.muteUntil))
@@ -274,103 +144,64 @@ function SnoozeControl() {
     setMuteUntil(s.muteUntil)
   }
 
-  const countdown = (() => {
-    if (!isMuted || muteUntil === null) return ''
-    const remaining = Math.max(0, muteUntil - now)
-    const totalSec = Math.floor(remaining / 1000)
-    const h = Math.floor(totalSec / 3600)
-    const m = Math.floor((totalSec % 3600) / 60)
-    const s = totalSec % 60
-    if (h > 0) return `${h}h ${m}m`
-    if (m > 0) return `${m}m ${s}s`
-    return `${s}s`
-  })()
+  const countdown = isMuted && muteUntil !== null ? snoozeCountdown(muteUntil - now) : ''
 
   if (isDisabled) {
     return (
-      <button
+      <Button
+        variant="ghost"
+        className="cog-tone-danger"
         onClick={handleEnable}
         title="Stale task alerts are disabled — click to re-enable"
-        style={{
-          background: '#2a1a1a', border: '1px solid #8a2a2a', borderRadius: '4px',
-          color: '#f04040', fontSize: '10px', cursor: 'pointer', padding: '1px 6px',
-          fontFamily: 'monospace'
-        }}
-      >🔇 Disabled</button>
+      ><Icon name="bell-off" size={15} />Disabled</Button>
     )
   }
 
   if (isMuted) {
     return (
-      <button
+      <Button
+        variant="ghost"
+        className="cog-tone-warning"
         onClick={handleUnmute}
         title="Click to unmute stale task alerts"
-        style={{
-          background: '#3a2a1a', border: '1px solid #8a5a2a', borderRadius: '4px',
-          color: '#f0a040', fontSize: '10px', cursor: 'pointer', padding: '1px 6px',
-          fontFamily: 'monospace'
-        }}
-      >⏸ Muted {countdown}</button>
+      ><Icon name="pause" size={15} />Muted <span className="cog-mono">{countdown}</span></Button>
     )
   }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <button
+    <div className="cog-menu-wrap">
+      <Button
+        ref={anchorRef}
+        variant="ghost"
         onClick={() => setOpen(v => !v)}
         title="Snooze stale task alerts"
-        style={{
-          background: 'none', border: '1px solid #444', borderRadius: '4px',
-          color: '#888', fontSize: '10px', cursor: 'pointer', padding: '1px 6px',
-          fontFamily: 'monospace'
-        }}
-      >🔔 Snooze</button>
+        aria-haspopup="menu"
+        aria-expanded={open}
+      ><Icon name="bell" size={15} />Snooze</Button>
       {open && (
-        <>
-          <div
-            onClick={() => setOpen(false)}
-            style={{ position: 'fixed', inset: 0, zIndex: 10 }}
-          />
-          <div style={{
-            position: 'absolute', top: '100%', right: 0, marginTop: '4px',
-            backgroundColor: '#222', border: '1px solid #444', borderRadius: '4px',
-            padding: '4px', zIndex: 11, minWidth: '110px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-          }}>
-            {SNOOZE_OPTIONS.map(opt => (
-              <button
-                key={opt.ms}
-                onClick={() => handleSet(opt.ms)}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  background: 'none', border: 'none', color: '#ccc',
-                  fontSize: '11px', padding: '4px 8px', cursor: 'pointer',
-                  fontFamily: 'monospace', borderRadius: '3px'
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#333' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent' }}
-              >{opt.label}</button>
-            ))}
-            <div style={{ borderTop: '1px solid #444', margin: '4px 0' }} />
-            <button
-              onClick={handleDisable}
-              style={{
-                display: 'block', width: '100%', textAlign: 'left',
-                background: 'none', border: 'none', color: '#f04040',
-                fontSize: '11px', padding: '4px 8px', cursor: 'pointer',
-                fontFamily: 'monospace', borderRadius: '3px'
-              }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#333' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'transparent' }}
-            >Disable</button>
-          </div>
-        </>
+        // Click-away layer, as before: a click outside only closes the menu.
+        <div className="cog-menu-backdrop" onClick={() => setOpen(false)} />
       )}
+      <Menu
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={anchorRef}
+        label="Snooze stale task alerts"
+        align="right"
+        closeOnOutside={false}
+        className="cog-pin__snooze"
+      >
+        {SNOOZE_OPTIONS.map(opt => (
+          <MenuItem key={opt.ms} onClick={() => handleSet(opt.ms)}>{opt.label}</MenuItem>
+        ))}
+        <MenuSeparator />
+        <MenuItem tone="danger" icon="bell-off" onClick={handleDisable}>Disable</MenuItem>
+      </Menu>
     </div>
   )
 }
 
-export function PinboardPanel({ tabId }: { tabId?: string }) {
+export function PinboardPanel({ tabId }: { tabId?: string }): React.ReactElement {
   const [tasks, setTasks] = useState<PinboardTask[]>([])
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const attachWheelGuard = useContainCanvasScroll<HTMLDivElement>()
@@ -400,13 +231,8 @@ export function PinboardPanel({ tabId }: { tabId?: string }) {
 
   if (tasks.length === 0) {
     return (
-      <div ref={attachWheelGuard} style={{
-        width: '100%', height: '100%',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        backgroundColor: '#1a1a1a', color: '#666',
-        fontFamily: 'monospace', fontSize: '13px'
-      }}>
-        No tasks yet
+      <div ref={attachWheelGuard} className="cog-panel cog-pin">
+        <EmptyState icon="pin">Tasks that agents post to the pinboard will appear here.</EmptyState>
       </div>
     )
   }
@@ -418,73 +244,41 @@ export function PinboardPanel({ tabId }: { tabId?: string }) {
   }
 
   const grouped = Object.fromEntries(
-    COLUMN_CONFIG.map(c => [c.key, tasks.filter(t => t.status === c.key)])
+    TASK_STATUS_ORDER.map(key => [key, tasks.filter(t => t.status === key)])
   ) as Record<PinboardTask['status'], PinboardTask[]>
 
   return (
-    <div ref={attachWheelGuard} style={{
-      width: '100%', height: '100%',
-      display: 'flex',
-      backgroundColor: '#1a1a1a',
-      fontFamily: 'monospace',
-      overflow: 'hidden'
-    }}>
-      {COLUMN_CONFIG.map((col, i) => (
-        <div key={col.key} style={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          borderRight: i < COLUMN_CONFIG.length - 1 ? '1px solid #333' : 'none',
-          overflow: 'hidden'
-        }}>
-          <div style={{
-            padding: '8px 10px',
-            borderBottom: '1px solid #333',
-            display: 'flex', alignItems: 'center', gap: '6px',
-            flexShrink: 0
-          }}>
-            <span style={{
-              width: '6px', height: '6px', borderRadius: '50%',
-              backgroundColor: col.accent
-            }} />
-            <span style={{ color: '#e0e0e0', fontSize: '12px', fontWeight: 600 }}>
-              {col.label}
-            </span>
-            <span style={{
-              color: '#888', fontSize: '11px',
-              marginLeft: 'auto',
-              backgroundColor: '#333', borderRadius: '8px',
-              padding: '0 6px', lineHeight: '18px'
-            }}>
-              {grouped[col.key].length}
-            </span>
-            {col.key === 'completed' && completedCount > 0 && (
-              <button
-                onClick={handleClearCompleted}
-                title="Clear all completed tasks"
-                style={{
-                  background: 'none', border: '1px solid #444', borderRadius: '4px',
-                  color: '#888', fontSize: '10px', cursor: 'pointer', padding: '1px 6px'
-                }}
-              >Clear</button>
-            )}
-            {col.key === 'in_progress' && <SnoozeControl />}
-          </div>
-
-          <div style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '6px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px'
-          }}>
-            {grouped[col.key].map(task => (
-              <TaskCard key={task.id} task={task} onClick={() => setSelectedTaskId(task.id)} />
-            ))}
-          </div>
-        </div>
-      ))}
+    <div ref={attachWheelGuard} className="cog-panel cog-pin">
+      <Toolbar label="Pinboard" actions={<SnoozeControl />}>
+        <span className="cog-pin__count">{tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}</span>
+      </Toolbar>
+      <div className="cog-pin__body">
+        {TASK_STATUS_ORDER.map(key => {
+          const st = taskStatusPresentation(key)
+          return (
+            <section key={key} className="cog-pin__group">
+              <SectionHeader
+                count={grouped[key].length}
+                actions={key === 'completed' && completedCount > 0 ? (
+                  <Button
+                    variant="ghost"
+                    className="cog-tone-danger"
+                    onClick={handleClearCompleted}
+                    title="Clear all completed tasks"
+                  ><Icon name="trash" size={14} />Clear</Button>
+                ) : null}
+              >
+                {st.word}
+              </SectionHeader>
+              {grouped[key].length === 0 ? (
+                <EmptyState icon={st.icon} compact>No {st.word.toLowerCase()} tasks.</EmptyState>
+              ) : grouped[key].map(task => (
+                <TaskRow key={task.id} task={task} onClick={() => setSelectedTaskId(task.id)} />
+              ))}
+            </section>
+          )
+        })}
+      </div>
     </div>
   )
 }

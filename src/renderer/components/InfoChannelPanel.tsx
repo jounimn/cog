@@ -1,75 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import type { InfoEntry } from '../../shared/types'
 import { useContainCanvasScroll } from '../hooks/useContainCanvasScroll'
-
-const containerStyle: React.CSSProperties = {
-  width: '100%',
-  height: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-  backgroundColor: '#1a1a1a',
-  color: '#e0e0e0',
-  fontFamily: 'Consolas, "SFMono-Regular", Menlo, Monaco, monospace',
-  overflow: 'hidden'
-}
-
-const scrollStyle: React.CSSProperties = {
-  flex: 1,
-  overflowY: 'auto',
-  overflowX: 'hidden',
-  padding: '8px 0'
-}
-
-const emptyStateStyle: React.CSSProperties = {
-  flex: 1,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: '#666',
-  fontSize: '12px',
-  padding: '16px'
-}
-
-const cardStyle: React.CSSProperties = {
-  margin: '0 8px',
-  padding: '10px 12px',
-  backgroundColor: '#2a2a2a',
-  borderBottom: '1px solid #3a3a3a',
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-word'
-}
-
-const agentLabelStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  padding: '2px 8px',
-  borderRadius: '999px',
-  backgroundColor: '#19324d',
-  border: '1px solid #2d4d73',
-  color: '#8cc4ff',
-  fontSize: '11px',
-  lineHeight: 1.4
-}
-
-const metaRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '8px',
-  marginBottom: '8px'
-}
-
-const tagStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  padding: '2px 7px',
-  borderRadius: '999px',
-  backgroundColor: '#333',
-  border: '1px solid #444',
-  color: '#b5b5b5',
-  fontSize: '10px',
-  lineHeight: 1.4
-}
+import { EmptyState } from '../ui'
 
 function formatTimestamp(value: string): string {
   const time = new Date(value).getTime()
@@ -137,26 +69,24 @@ export function InfoChannelPanel({ tabId }: { tabId?: string }): React.ReactElem
   const renderedEntries = useMemo(() => sortNewestFirst(entries), [entries])
 
   return (
-    <div ref={attachWheelGuard} style={containerStyle}>
+    <div ref={attachWheelGuard} className="cog-panel cog-info">
       {renderedEntries.length === 0 ? (
-        <div style={emptyStateStyle}>No info entries yet</div>
+        <EmptyState icon="radio">Notes that agents post to the info channel will appear here.</EmptyState>
       ) : (
-        <div ref={scrollRef} style={scrollStyle}>
+        <div ref={scrollRef} className="cog-info__list">
           {renderedEntries.map(entry => (
-            <article key={entry.id} style={cardStyle}>
-              <div style={metaRowStyle}>
-                <span style={agentLabelStyle}>{entry.from}</span>
-                <span style={{ color: '#7a7a7a', fontSize: '11px', flexShrink: 0 }}>
-                  {formatTimestamp(entry.createdAt)}
-                </span>
+            <article key={entry.id} className="cog-info__entry">
+              <div className="cog-info__head">
+                <span className="cog-info__from">{entry.from}</span>
+                <span className="cog-info__time">{formatTimestamp(entry.createdAt)}</span>
               </div>
 
-              <div style={{ fontSize: '12px', lineHeight: 1.5 }}>{entry.note}</div>
+              <div className="cog-info__note">{entry.note}</div>
 
               {entry.tags.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '8px' }}>
+                <div className="cog-info__tags">
                   {entry.tags.map(tag => (
-                    <span key={`${entry.id}-${tag}`} style={tagStyle}>
+                    <span key={`${entry.id}-${tag}`} className="cog-tag">
                       {tag}
                     </span>
                   ))}

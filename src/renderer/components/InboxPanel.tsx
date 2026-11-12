@@ -1,120 +1,24 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useId, useMemo, useState } from 'react'
 import type { InboxMessage, InboxPriority, NotificationThreshold } from '../../shared/types'
-
-const containerStyle: React.CSSProperties = {
-  width: '100%',
-  height: '100%',
-  display: 'flex',
-  flexDirection: 'column',
-  backgroundColor: '#1a1a1a',
-  color: '#e0e0e0',
-  fontFamily: 'Consolas, "SFMono-Regular", Menlo, Monaco, monospace',
-  overflow: 'hidden'
-}
-
-const toolbarStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '8px',
-  padding: '8px 10px',
-  borderBottom: '1px solid #2c2c2c',
-  backgroundColor: '#202020',
-  flexShrink: 0
-}
-
-const selectStyle: React.CSSProperties = {
-  backgroundColor: '#1a1a1a',
-  color: '#e0e0e0',
-  border: '1px solid #3a3a3a',
-  borderRadius: '4px',
-  padding: '3px 6px',
-  fontSize: '11px',
-  fontFamily: 'inherit'
-}
-
-const buttonStyle: React.CSSProperties = {
-  backgroundColor: '#2a2a2a',
-  color: '#aaa',
-  border: '1px solid #3a3a3a',
-  borderRadius: '4px',
-  padding: '3px 8px',
-  fontSize: '11px',
-  cursor: 'pointer'
-}
-
-const scrollStyle: React.CSSProperties = {
-  flex: 1,
-  overflowY: 'auto',
-  overflowX: 'hidden',
-  padding: '4px 0'
-}
-
-const cardStyle: React.CSSProperties = {
-  margin: '6px 8px',
-  padding: '10px 12px',
-  backgroundColor: '#222',
-  border: '1px solid #2e2e2e',
-  borderRadius: '6px',
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-word'
-}
-
-const cardUnreadStyle: React.CSSProperties = {
-  ...cardStyle,
-  backgroundColor: '#1f2a36',
-  borderColor: '#2d4566'
-}
-
-const metaRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '8px',
-  marginBottom: '6px'
-}
-
-const metaLeft: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: '8px'
-}
-
-const dateStyle: React.CSSProperties = {
-  color: '#666',
-  fontSize: '11px'
-}
-
-const replyAreaStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '6px',
-  marginTop: '8px',
-  paddingTop: '8px',
-  borderTop: '1px solid #2c2c2c'
-}
-
-const textareaStyle: React.CSSProperties = {
-  backgroundColor: '#1a1a1a',
-  color: '#e0e0e0',
-  border: '1px solid #3a3a3a',
-  borderRadius: '4px',
-  padding: '6px 8px',
-  fontSize: '12px',
-  fontFamily: 'inherit',
-  resize: 'vertical',
-  minHeight: '60px'
-}
-
-const PRIORITY_COLORS: Record<InboxPriority, { bg: string; fg: string; border: string; label: string }> = {
-  low:    { bg: '#2a2f3a', fg: '#9ab', border: '#3c4452', label: 'LOW' },
-  normal: { bg: '#1f3147', fg: '#8cc4ff', border: '#2d4d73', label: 'NORMAL' },
-  high:   { bg: '#3a2c14', fg: '#f5a25a', border: '#5a4520', label: 'HIGH' },
-  urgent: { bg: '#3d1717', fg: '#ff7777', border: '#6e2a2a', label: 'URGENT' }
-}
+import { Button, Icon, Select, Textarea, EmptyState, Toolbar } from '../ui'
+import { inboxPriorityPresentation, INBOX_FILTER_LABELS } from '../panel-present'
 
 const PRIORITY_RANK: Record<InboxPriority, number> = {
   low: 0, normal: 1, high: 2, urgent: 3
 }
 
 type Filter = 'all' | 'unread' | 'high+' | 'urgent'
+
+const FILTER_OPTIONS: { value: Filter; label: string }[] =
+  (Object.keys(INBOX_FILTER_LABELS) as Filter[]).map(value => ({ value, label: INBOX_FILTER_LABELS[value] }))
+
+const THRESHOLD_OPTIONS: { value: NotificationThreshold; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'low', label: 'Low+' },
+  { value: 'normal', label: 'Normal+' },
+  { value: 'high', label: 'High+' },
+  { value: 'urgent', label: 'Urgent only' }
+]
 
 export function InboxPanel(): React.ReactElement {
   const [messages, setMessages] = useState<InboxMessage[]>([])
@@ -126,6 +30,8 @@ export function InboxPanel(): React.ReactElement {
   // The Review button shows only for a still-pending proposal.
   const [pendingProposals, setPendingProposals] = useState<Set<string>>(new Set())
   const [resolvedProposals, setResolvedProposals] = useState<Set<string>>(new Set())
+  const filterId = useId()
+  const notifyId = useId()
 
   useEffect(() => {
     let mounted = true
@@ -198,111 +104,95 @@ export function InboxPanel(): React.ReactElement {
   }
 
   return (
-    <div style={containerStyle}>
-      <div style={toolbarStyle}>
-        <span style={{ color: '#888', fontSize: '11px' }}>Filter:</span>
-        <select value={filter} onChange={e => setFilter(e.target.value as Filter)} style={selectStyle}>
-          <option value="all">All</option>
-          <option value="unread">Unread</option>
-          <option value="high+">High+ only</option>
-          <option value="urgent">Urgent only</option>
-        </select>
-        <span style={{ color: '#888', fontSize: '11px', marginLeft: '8px' }}>Notify:</span>
-        <select value={threshold} onChange={e => handleThresholdChange(e.target.value as NotificationThreshold)} style={selectStyle}>
-          <option value="none">None</option>
-          <option value="low">Low+</option>
-          <option value="normal">Normal+</option>
-          <option value="high">High+</option>
-          <option value="urgent">Urgent only</option>
-        </select>
-        <div style={{ flex: 1 }} />
-        <button onClick={handleMarkAllRead} style={buttonStyle}>Mark all read</button>
-      </div>
+    <div className="cog-panel cog-inbox">
+      <Toolbar
+        label="Inbox"
+        actions={
+          <Button variant="ghost" onClick={handleMarkAllRead}>
+            <Icon name="check" size={15} />Mark all read
+          </Button>
+        }
+      >
+        <label className="cog-inbox__label" htmlFor={filterId}>Filter</label>
+        <Select id={filterId} value={filter} options={FILTER_OPTIONS} onChange={setFilter} />
+        <label className="cog-inbox__label" htmlFor={notifyId}>Notify</label>
+        <Select id={notifyId} value={threshold} options={THRESHOLD_OPTIONS} onChange={handleThresholdChange} />
+      </Toolbar>
 
-      <div style={scrollStyle}>
+      <div className="cog-inbox__list">
         {filtered.length === 0 && (
-          <div style={{ padding: '24px 16px', textAlign: 'center', color: '#666', fontSize: '12px' }}>
-            No messages{filter !== 'all' ? ` matching "${filter}"` : ''}.
-          </div>
+          <EmptyState icon="inbox">
+            {filter === 'all'
+              ? 'Messages that agents send you will appear here.'
+              : `No messages match "${INBOX_FILTER_LABELS[filter]}".`}
+          </EmptyState>
         )}
         {filtered.map(m => {
-          const colors = PRIORITY_COLORS[m.priority]
+          const pr = inboxPriorityPresentation(m.priority)
           const isUnread = !m.readAt
           const isReplying = replying === m.id
+          const proposalId = proposalIdOf(m)
+          const showReview = !!proposalId && pendingProposals.has(proposalId) && !resolvedProposals.has(proposalId)
           return (
-            <div key={m.id} style={isUnread ? cardUnreadStyle : cardStyle}>
-              <div style={metaRowStyle}>
-                <div style={metaLeft}>
-                  <span style={{
-                    display: 'inline-flex',
-                    padding: '2px 8px',
-                    borderRadius: '999px',
-                    backgroundColor: colors.bg,
-                    border: `1px solid ${colors.border}`,
-                    color: colors.fg,
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    letterSpacing: '0.5px'
-                  }}>{colors.label}</span>
-                  <span style={{ color: '#aaa', fontSize: '12px' }}>from {m.agentName}</span>
-                  {m.tags.length > 0 && (
-                    <span style={{ color: '#666', fontSize: '11px' }}>
-                      {m.tags.map(t => `#${t}`).join(' ')}
-                    </span>
-                  )}
-                </div>
-                <span style={dateStyle}>{formatDate(m.createdAt)}</span>
-              </div>
-              <div style={{ color: '#ddd', fontSize: '13px', lineHeight: 1.45 }}>{m.message}</div>
-              {(() => {
-                const proposalId = proposalIdOf(m)
-                if (!proposalId || !pendingProposals.has(proposalId) || resolvedProposals.has(proposalId)) return null
-                return (
-                  <button
-                    onClick={() => handleReviewProposal(proposalId)}
-                    style={{ ...buttonStyle, marginTop: '8px', color: '#8cffa0', borderColor: '#2d663a', backgroundColor: '#16281c' }}
-                  >Open / Review team proposal ▸</button>
-                )
-              })()}
-              <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+            <article key={m.id} className={isUnread ? 'cog-msg cog-msg--unread' : 'cog-msg'}>
+              <div className="cog-msg__head">
+                <span className={pr.tone ? `cog-msg__prio cog-tone-${pr.tone}` : 'cog-msg__prio'}>
+                  {pr.icon && <Icon name={pr.icon} size={14} />}{pr.word}
+                </span>
+                <span className="cog-msg__from">from <strong>{m.agentName}</strong></span>
+                {m.tags.length > 0 && (
+                  <span className="cog-msg__tags" title={m.tags.map(t => `#${t}`).join(' ')}>
+                    {m.tags.map(t => `#${t}`).join(' ')}
+                  </span>
+                )}
                 {isUnread && (
-                  <button onClick={() => handleMarkRead(m.id)} style={buttonStyle}>Mark read</button>
+                  <span className="cog-msg__unread cog-tone-working"><Icon name="circle-dot" size={12} />Unread</span>
+                )}
+                <span className="cog-msg__time">{formatDate(m.createdAt)}</span>
+              </div>
+              <div className="cog-msg__body">{m.message}</div>
+              {showReview && proposalId && (
+                <Button className="cog-msg__proposal" onClick={() => handleReviewProposal(proposalId)}>
+                  Open / Review team proposal<Icon name="chevron-right" size={15} />
+                </Button>
+              )}
+              <div className="cog-msg__actions">
+                {isUnread && (
+                  <Button variant="ghost" onClick={() => handleMarkRead(m.id)}>
+                    <Icon name="check" size={14} />Mark read
+                  </Button>
                 )}
                 {!isReplying && (
-                  <button onClick={() => handleStartReply(m.id)} style={buttonStyle}>Reply</button>
+                  <Button variant="ghost" onClick={() => handleStartReply(m.id)}>
+                    <Icon name="reply" size={14} />Reply
+                  </Button>
                 )}
-                <div style={{ flex: 1 }} />
-                <button onClick={() => handleDelete(m.id)} style={{ ...buttonStyle, color: '#a55' }}>
-                  Delete
-                </button>
+                <div className="cog-msg__spacer" />
+                <Button variant="ghost" className="cog-tone-danger" onClick={() => handleDelete(m.id)}>
+                  <Icon name="trash" size={14} />Delete
+                </Button>
               </div>
               {isReplying && (
-                <div style={replyAreaStyle}>
-                  <textarea
+                <div className="cog-msg__reply">
+                  <Textarea
                     value={replyText}
                     onChange={e => setReplyText(e.target.value)}
-                    placeholder={`Reply to ${m.agentName}...`}
-                    style={textareaStyle}
+                    placeholder={`Reply to ${m.agentName}…`}
+                    aria-label={`Reply to ${m.agentName}`}
                     autoFocus
                   />
-                  <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end' }}>
-                    <button onClick={() => { setReplying(null); setReplyText('') }} style={buttonStyle}>
+                  <div className="cog-msg__reply-actions">
+                    <Button variant="ghost" onClick={() => { setReplying(null); setReplyText('') }}>
                       Cancel
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       onClick={() => handleSendReply(m.agentName)}
                       disabled={!replyText.trim()}
-                      style={{
-                        ...buttonStyle,
-                        backgroundColor: replyText.trim() ? '#2d4d73' : '#2a2a2a',
-                        color: replyText.trim() ? '#8cc4ff' : '#555',
-                        cursor: replyText.trim() ? 'pointer' : 'not-allowed'
-                      }}
-                    >Send</button>
+                    >Send</Button>
                   </div>
                 </div>
               )}
-            </div>
+            </article>
           )
         })}
       </div>
