@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import type { CreateScheduleInput, EditScheduleInput, ScheduledPrompt } from '../../shared/types'
+import { Button, Checkbox, Dialog, Field, FieldError, Input, Select, Textarea } from '../ui'
 
 export interface AgentOption {
   id: string
@@ -88,107 +89,70 @@ export function ScheduleDialog({ open, mode, agents, initialValues, onSubmit, on
   }
 
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-      }}
+    <Dialog
+      title={mode === 'create' ? 'New scheduled prompt' : 'Edit scheduled prompt'}
+      icon="calendar-clock"
+      size="sm"
+      zIndex={1000}
+      onClose={onClose}
+      closeOnBackdrop
+      footerStart={error ? <FieldError>{error}</FieldError> : undefined}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit}>{mode === 'create' ? 'Start' : 'Save'}</Button>
+        </>
+      }
     >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: '#1a1a1a', border: '1px solid #333', borderRadius: 6,
-          padding: 20, width: 440, maxWidth: 'calc(100vw - 40px)',
-          maxHeight: 'calc(100vh - 40px)', overflowY: 'auto',
-          color: '#e0e0e0', display: 'flex',
-          flexDirection: 'column', gap: 10
-        }}
-      >
-        <h3 style={{ margin: 0, fontSize: 16 }}>
-          {mode === 'create' ? 'New Scheduled Prompt' : 'Edit Scheduled Prompt'}
-        </h3>
+      <Field label="Name (optional)">
+        <Input
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Keep orchestrator going"
+        />
+      </Field>
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-          Name (optional)
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="Keep orchestrator going"
-            style={{ background: '#2a2a2a', border: '1px solid #333', color: '#e0e0e0', padding: 6, borderRadius: 4 }}
-          />
-        </label>
+      <Field label="Target agent">
+        <Select
+          value={agentId}
+          onChange={setAgentId}
+          disabled={mode === 'edit'}
+          options={agents.map(a => ({ value: a.id, label: `${a.name} (${a.tabName})` }))}
+        />
+      </Field>
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-          Target agent
-          <select
-            value={agentId}
-            onChange={e => setAgentId(e.target.value)}
-            disabled={mode === 'edit'}
-            style={{ background: '#2a2a2a', border: '1px solid #333', color: '#e0e0e0', padding: 6, borderRadius: 4 }}
-          >
-            {agents.map(a => (
-              <option key={a.id} value={a.id}>{a.name} ({a.tabName})</option>
-            ))}
-          </select>
-        </label>
+      <Field label="Prompt">
+        <Textarea
+          value={promptText}
+          onChange={e => setPromptText(e.target.value)}
+          rows={4}
+          className="cog-schedule__prompt"
+          placeholder="You're good to keep going! Add more tasks and push progress forward."
+        />
+      </Field>
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-          Prompt
-          <textarea
-            value={promptText}
-            onChange={e => setPromptText(e.target.value)}
-            rows={4}
-            placeholder="You're good to keep going! Add more tasks and push progress forward."
-            style={{ background: '#2a2a2a', border: '1px solid #333', color: '#e0e0e0', padding: 6, borderRadius: 4, resize: 'vertical', fontFamily: 'inherit' }}
-          />
-        </label>
+      <Field label="Interval (minutes)">
+        <Input
+          mono
+          type="number"
+          min={1}
+          value={intervalMinutes}
+          onChange={e => setIntervalMinutes(e.target.value)}
+        />
+      </Field>
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-          Interval (minutes)
-          <input
-            type="number"
-            min={1}
-            value={intervalMinutes}
-            onChange={e => setIntervalMinutes(e.target.value)}
-            style={{ background: '#2a2a2a', border: '1px solid #333', color: '#e0e0e0', padding: 6, borderRadius: 4 }}
-          />
-        </label>
+      <Checkbox checked={infinite} onChange={setInfinite}>Run indefinitely</Checkbox>
 
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <input type="checkbox" checked={infinite} onChange={e => setInfinite(e.target.checked)} />
-          Run indefinitely
-        </label>
-
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, opacity: infinite ? 0.4 : 1 }}>
-          Duration (hours)
-          <input
-            type="number"
-            min={1}
-            value={durationHours}
-            disabled={infinite}
-            onChange={e => setDurationHours(e.target.value)}
-            style={{ background: '#2a2a2a', border: '1px solid #333', color: '#e0e0e0', padding: 6, borderRadius: 4 }}
-          />
-        </label>
-
-        {error && <div style={{ color: '#ef4444', fontSize: 12 }}>{error}</div>}
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
-          <button
-            onClick={onClose}
-            style={{ background: '#2a2a2a', color: '#e0e0e0', border: '1px solid #333', padding: '6px 14px', borderRadius: 4, cursor: 'pointer' }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={submit}
-            style={{ background: '#3b82f6', color: '#fff', border: 'none', padding: '6px 14px', borderRadius: 4, cursor: 'pointer' }}
-          >
-            {mode === 'create' ? 'Start' : 'Save'}
-          </button>
-        </div>
-      </div>
-    </div>
+      <Field label="Duration (hours)" className={infinite ? 'cog-field--disabled' : undefined}>
+        <Input
+          mono
+          type="number"
+          min={1}
+          value={durationHours}
+          disabled={infinite}
+          onChange={e => setDurationHours(e.target.value)}
+        />
+      </Field>
+    </Dialog>
   )
 }

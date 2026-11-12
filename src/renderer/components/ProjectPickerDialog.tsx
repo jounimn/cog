@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import type { RecentProject } from '../../shared/types'
+import { Button, Dialog, EmptyState, Icon } from '../ui'
 
 declare const electronAPI: {
   listRecentProjects: () => Promise<RecentProject[]>
@@ -35,99 +36,48 @@ export function ProjectPickerDialog({ isFullScreen, onProjectOpened, onCancel }:
     onProjectOpened(project)
   }
 
-  const overlayStyle: React.CSSProperties = isFullScreen ? {
-    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: '#1a1a1a',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    zIndex: 9999
-  } : {
-    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    zIndex: 9999
-  }
-
   return (
-    <div style={overlayStyle}>
-      <div style={{
-        backgroundColor: '#252525',
-        borderRadius: '12px',
-        border: '1px solid #333',
-        padding: '32px',
-        width: '480px',
-        maxHeight: '600px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '20px'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0, color: '#e0e0e0', fontSize: '18px' }}>
-            {isFullScreen ? 'Open a Project' : 'Switch Project'}
-          </h2>
-          {onCancel && (
-            <button onClick={onCancel} style={{
-              background: 'none', border: 'none', color: '#666',
-              fontSize: '18px', cursor: 'pointer', padding: '4px'
-            }}>x</button>
-          )}
-        </div>
+    <Dialog
+      title={isFullScreen ? 'Open a project' : 'Switch project'}
+      icon="folder-open"
+      size="sm"
+      zIndex={9999}
+      opaque={isFullScreen}
+      onClose={onCancel}
+    >
+      <Button variant="ghost" className="cog-picker__open" onClick={handleOpenFolder} disabled={loading}>
+        <Icon name="folder-open" size={14} />Open Folder...
+      </Button>
 
-        <button
-          onClick={handleOpenFolder}
-          disabled={loading}
-          style={{
-            padding: '12px 16px',
-            borderRadius: '8px',
-            border: '1px solid #4a9eff',
-            backgroundColor: '#1e3a5f',
-            color: '#8cc4ff',
-            fontSize: '14px',
-            cursor: loading ? 'wait' : 'pointer',
-            textAlign: 'left'
-          }}
-        >
-          Open Folder...
-        </button>
-
-        {recent.length > 0 && (
-          <>
-            <div style={{ color: '#888', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Recent Projects
-            </div>
-            <div style={{ overflow: 'auto', maxHeight: '360px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {recent.map(project => (
-                <button
-                  key={project.path}
-                  onClick={() => handleSelectRecent(project.path)}
-                  disabled={loading}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #333',
-                    backgroundColor: '#2a2a2a',
-                    color: '#e0e0e0',
-                    fontSize: '13px',
-                    cursor: loading ? 'wait' : 'pointer',
-                    textAlign: 'left',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px'
-                  }}
-                >
-                  <span style={{ fontWeight: 500 }}>{project.name}</span>
-                  <span style={{ color: '#666', fontSize: '11px' }}>{project.path}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
-        {recent.length === 0 && (
-          <div style={{ color: '#555', fontSize: '13px', textAlign: 'center', padding: '20px 0' }}>
-            No recent projects. Open a folder to get started.
+      {recent.length > 0 && (
+        <div className="cog-picker__recent">
+          <span className="cog-field__label cog-picker__label">Recent projects</span>
+          <div className="cog-dialog__list cog-picker__list">
+            {recent.map(project => (
+              <button
+                key={project.path}
+                type="button"
+                className="cog-row cog-row--action"
+                onClick={() => handleSelectRecent(project.path)}
+                disabled={loading}
+                title={project.path}
+              >
+                <span className="cog-row__icon"><Icon name="folder" size={14} /></span>
+                <span className="cog-row__title">{project.name}</span>
+                <span className="cog-row__line2">
+                  <span className="cog-row__meta">{project.path}</span>
+                </span>
+              </button>
+            ))}
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+
+      {recent.length === 0 && (
+        <EmptyState icon="folder" compact>
+          No recent projects. Open a folder to get started.
+        </EmptyState>
+      )}
+    </Dialog>
   )
 }
