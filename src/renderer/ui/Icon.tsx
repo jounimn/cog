@@ -9,6 +9,7 @@ export type IconName =
   | 'crosshair' | 'eraser' | 'circle-x'
   | 'refresh-cw' | 'arrow-up' | 'arrow-down' | 'chevron-right' | 'folder-open' | 'file' | 'git-commit'
   | 'circle-alert' | 'circle-check' | 'trash'
+  | 'circle' | 'arrow-left' | 'bell' | 'bell-off' | 'reply'
 
 // Lucide (ISC) glyphs, 24 viewBox. See LUCIDE-LICENSE.txt.
 const GLYPHS: Record<IconName, React.ReactNode> = {
@@ -62,7 +63,12 @@ const GLYPHS: Record<IconName, React.ReactNode> = {
   'git-commit': <><circle cx="12" cy="12" r="3" /><line x1="3" x2="9" y1="12" y2="12" /><line x1="15" x2="21" y1="12" y2="12" /></>,
   'circle-alert': <><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></>,
   'circle-check': <><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></>,
-  trash: <><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></>
+  trash: <><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></>,
+  circle: <circle cx="12" cy="12" r="10" />,
+  'arrow-left': <><path d="m12 19-7-7 7-7" /><path d="M19 12H5" /></>,
+  bell: <><path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" /></>,
+  'bell-off': <><path d="M10.268 21a2 2 0 0 0 3.464 0" /><path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742" /><path d="m2 2 20 20" /><path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05" /></>,
+  reply: <><polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></>
 }
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }): React.ReactElement {
