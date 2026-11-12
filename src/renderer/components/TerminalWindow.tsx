@@ -166,7 +166,7 @@ export function TerminalWindow({ agentId, agentName, theme }: TerminalWindowProp
     <div
       ref={containerRef}
       onWheel={(e) => e.stopPropagation()}
-      style={{ width: '100%', height: '100%', backgroundColor: resolved.xterm.background }}
+      style={{ width: '100%', height: '100%', boxSizing: 'border-box', padding: '6px 8px', backgroundColor: resolved.xterm.background }}
     />
   )
 }
