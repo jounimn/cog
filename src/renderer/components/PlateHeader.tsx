@@ -1,7 +1,7 @@
 import React from 'react'
 import type { AgentStatus, AgentTheme } from '../../shared/types'
 import { DEFAULT_THEME, resolveTheme } from '../themes'
-import { Button, Icon, StatusChip, c } from '../ui'
+import { Button, Icon, StatusChip, c, type IconName } from '../ui'
 
 export interface PlateAccent {
   chrome: string
@@ -36,6 +36,8 @@ export interface PlateSpec { text: string; mono?: boolean }
 
 export interface PlateHeaderProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'title'> {
   title: string
+  /** Lucide icon before the title (a sleeping agent's moon, the Sketchpad's book). */
+  icon?: IconName
   /** Data readout under the name (cli, model). Empty parts are omitted. */
   spec?: PlateSpec[]
   status?: AgentStatus
@@ -52,7 +54,7 @@ const stop = (e: React.SyntheticEvent): void => e.stopPropagation()
 
 /** The title bar shared by canvas windows and mosaic panes. Extra props go to the bar itself. */
 export function PlateHeader({
-  title, spec, status, focused, accent, maximized, onMaximize, onClose, extra, style, className, ...bar
+  title, icon, spec, status, focused, accent, maximized, onMaximize, onClose, extra, style, className, ...bar
 }: PlateHeaderProps): React.ReactElement {
   const parts = (spec ?? []).filter(p => !!p.text)
   const cls = ['cog-plate__head', className].filter(Boolean).join(' ')
@@ -70,7 +72,12 @@ export function PlateHeader({
       }}
     >
       <div className="cog-plate__name" style={{ flex: 1 }}>
-        <h2 title={title}>{title}</h2>
+        {icon ? (
+          <div className="cog-plate__title">
+            <span className="cog-plate__icon" aria-hidden="true"><Icon name={icon} size={13} /></span>
+            <h2 title={title}>{title}</h2>
+          </div>
+        ) : <h2 title={title}>{title}</h2>}
         {parts.length > 0 && (
           <div className="cog-plate__spec" style={{ fontFamily: 'var(--font-text)' }}>
             {parts.map((p, i) => (

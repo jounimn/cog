@@ -6,11 +6,13 @@ import type { AgentTheme, AgentStatus } from '../../shared/types'
 import { cardPresentation } from '../sleep-ui'
 import { THEME_PRESETS, resolveTheme } from '../themes'
 import { PlateHeader, PlateTicks, plateAccent, type PlateSpec } from './PlateHeader'
-import { Button, Icon, c, font } from '../ui'
+import { Button, Icon, c, font, type IconName } from '../ui'
 
 interface FloatingWindowProps {
   id: string
   title: string
+  /** Lucide icon before the title; a sleeping or waking agent's status icon takes precedence. */
+  icon?: IconName
   /** Agent cli and model, shown under the name. */
   spec?: PlateSpec[]
   /** This is the focused window (the top one). */
@@ -67,6 +69,7 @@ interface FloatingWindowProps {
 export function FloatingWindow({
   id,
   title,
+  icon,
   spec,
   focused,
   x,
@@ -257,12 +260,12 @@ export function FloatingWindow({
     border: `1px solid ${accent?.border ?? (focused ? c('steel') : c('line-strong'))}`,
     backgroundColor: bodyBg ?? (accent ? resolvedTheme.bg : c('surface'))
   }
-  const titleText = `${presentation.titlePrefix}${title}`
   const onTitleDoubleClick = status === 'sleeping' && onWakeAgent && agentId ? () => onWakeAgent(agentId) : onMaximize
   const header = (isMaximized: boolean): React.ReactElement => (
     <PlateHeader
       className="window-titlebar"
-      title={titleText}
+      title={title}
+      icon={presentation.titleIcon ?? icon}
       spec={spec}
       status={isAgent ? status : undefined}
       focused={focused}
@@ -385,17 +388,21 @@ function ThemeMenu({ x, y, theme, onClose, onApplyPreset, onChangeField, onEdit,
               key={preset.id}
               onClick={() => onApplyPreset(preset.id === 'default' ? null : preset.theme)}
               title={preset.label}
+              aria-label={preset.label}
               style={{
-                background: preset.theme.chrome,
-                border: `1px solid ${preset.theme.border}`,
-                borderRadius: '4px',
-                color: preset.theme.text,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px',
+                background: c('surface-muted'),
+                border: `1px solid ${c('line-strong')}`,
+                borderRadius: 'var(--r)',
                 cursor: 'pointer',
-                fontSize: '14px',
-                padding: '8px 0',
-                lineHeight: 1
+                padding: '7px 0'
               }}
-            >{preset.emoji}</button>
+            >
+              {/* The theme's own colours: title bar, background, text. */}
+              {[preset.theme.chrome, preset.theme.bg, preset.theme.text].map((swatch, i) => (
+                <span key={i} aria-hidden="true" style={{ width: 8, height: 8, flex: 'none', background: swatch, border: `1px solid ${preset.theme.border}` }} />
+              ))}
+            </button>
           ))}
         </div>
 

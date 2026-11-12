@@ -245,6 +245,9 @@
 }
 .cog-plate__name { display: flex; flex-direction: column; gap: calc(2px * var(--u, 1)); min-width: 0; }
 .cog-plate__name h2 { margin: 0; font: 600 calc(13px * var(--u, 1))/1.1 var(--font-text); color: rgb(var(--ink)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cog-plate__title { display: flex; align-items: center; gap: calc(6px * var(--u, 1)); min-width: 0; }
+.cog-plate__icon { display: inline-flex; flex: none; color: rgb(var(--ink-muted)); }
+.cog-plate__icon svg { width: calc(13px * var(--u, 1)); height: calc(13px * var(--u, 1)); }
 .cog-plate__spec { display: flex; align-items: center; font: 400 calc(12px * var(--u, 1))/1.1 var(--font-mono); color: rgb(var(--ink-subtle)); }
 .cog-plate__spec span + span { border-left: 1px solid rgb(var(--line-strong)); margin-left: calc(7px * var(--u, 1)); padding-left: calc(7px * var(--u, 1)); }
 .cog-plate__spacer { flex: 1; }
@@ -1005,9 +1008,19 @@
 .cog-skills__community .cog-skills__hint { max-width: 350px; font-size: 12px; color: rgb(var(--ink-subtle)); }
 .cog-skills__count b { font: 500 12px/1 var(--font-mono); color: rgb(var(--ink-muted)); }
 
-/* ---------- Update notice (toast) ---------- */
+/* ---------- Toasts (update notice, sleep notice) ----------
+ * One toast position for the app: a stack at the bottom right, raised above the
+ * canvas overlays so it never covers them. The zoom bar sits bottom-left and the
+ * minimap bottom-right, both 12px off the bottom; the minimap is the taller
+ * (~154px), so the stack starts 12px above it: 12 + 154 + 12 = 178px. */
+.cog-toasts {
+  position: fixed; right: 12px; bottom: 178px; z-index: 99999;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  pointer-events: none;
+}
+.cog-toasts:empty { display: none; }
 .cog-toast {
-  position: fixed; bottom: 12px; left: 12px; z-index: 99999; box-sizing: border-box; max-width: 360px; padding: 10px 12px;
+  pointer-events: auto; box-sizing: border-box; max-width: 360px; padding: 10px 12px;
   background: rgb(var(--surface)); border: 1px solid rgb(var(--line-strong)); border-radius: var(--r);
   box-shadow: 0 4px 12px rgb(var(--surface-sunk) / 0.45);
   color: rgb(var(--ink)); font: 400 12px/1.4 var(--font-text);
@@ -1020,6 +1033,10 @@
 .cog-toast__msg { margin-bottom: 8px; color: rgb(var(--ink-muted)); word-break: break-word; }
 .cog-toast__actions { display: flex; gap: 6px; }
 .cog-toast__actions .cog-btn { height: 26px; font-size: 12px; }
+.cog-toast--danger { border-color: rgb(var(--danger)); }
+.cog-toast--danger .cog-toast__head { margin-bottom: 0; align-items: flex-start; }
+.cog-toast--danger .cog-toast__head > svg { color: rgb(var(--danger)); margin-top: 1px; }
+.cog-toast__text { flex: 1; color: rgb(var(--ink)); word-break: break-word; }
 .cog-toast__status { display: flex; align-items: flex-start; gap: 6px; margin-bottom: 8px; }
 .cog-toast__status > svg { flex: none; margin-top: 1px; }
 .cog-toast .cog-note { margin-bottom: 8px; }

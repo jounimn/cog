@@ -17,6 +17,7 @@ import { useAppearance } from '../appearance-store'
 import { resolveAppearance } from '../terminal-appearance'
 import { getPanelType } from '../panel-ids'
 import { renderWindowContent, windowAgent, windowHeading } from './window-content'
+import { topVisibleWindow } from '../window-stack'
 
 /** Layout colour sent to remote clients, which have no CSS tokens; keeps the previous grey. */
 // wire format: remote clients parse #rrggbb — exempt from the token rule
@@ -88,7 +89,7 @@ export function Workspace({
   const [linkDrawing, setLinkDrawing] = useState(false)
   const [linkFromAgent, setLinkFromAgent] = useState<string | null>(null)
   // The focused window is the top one: focusing bumps its zIndex.
-  const focusedWindowId = windows.reduce<WindowState | null>((top, w) => (w.minimized || (top && top.zIndex >= w.zIndex) ? top : w), null)?.id
+  const focusedWindowId = topVisibleWindow(windows)?.id
   const [linkFromPos, setLinkFromPos] = useState<{ x: number; y: number } | null>(null)
   const [linkMousePos, setLinkMousePos] = useState<{ x: number; y: number } | null>(null)
 
@@ -402,7 +403,7 @@ export function Workspace({
         {windows.map(win => {
           const panelType = getPanelType(win.id)
           const agent = windowAgent(win, agents)
-          const { title, spec } = windowHeading(win, agents)
+          const { title, spec, icon } = windowHeading(win, agents)
 
           const content = renderWindowContent(win, { agents, tabs, activeTabId })
 
@@ -415,6 +416,7 @@ export function Workspace({
               <FloatingWindow
                 id={win.id}
                 title={title}
+                icon={icon}
                 spec={spec}
                 focused={win.id === focusedWindowId}
                 x={win.x}

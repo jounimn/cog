@@ -1,13 +1,15 @@
 import React from 'react'
 import type { AgentStatus, AgentTheme } from '../../shared/types'
 import { PlateHeader, PlateTicks, plateAccent, type PlateSpec } from './PlateHeader'
-import { c } from '../ui'
+import { c, type IconName } from '../ui'
 
 export interface MosaicPaneProps {
   id: string
   /** The agent's name for agent panes: lets an agent pill be dropped here to link (like a canvas window). */
   agentName?: string
   title: string
+  /** Lucide icon before the title (the Sketchpad's book). */
+  icon?: IconName
   /** Agent cli and model, shown under the name. */
   spec?: PlateSpec[]
   status?: AgentStatus
@@ -29,7 +31,7 @@ export interface MosaicPaneProps {
 
 /** One tile of the Mosaic view: a FloatingWindow-style plate header over the window's content. */
 export function MosaicPane({
-  id, agentName, title, spec, status, theme, linkedNames, focused, maximized,
+  id, agentName, title, icon, spec, status, theme, linkedNames, focused, maximized,
   onFocus, onToggleMaximize, onClose, onHeaderPointerDown, dragging, children
 }: MosaicPaneProps): React.ReactElement {
   const accent = plateAccent(theme)
@@ -45,6 +47,7 @@ export function MosaicPane({
     >
       <PlateHeader
         title={title}
+        icon={icon}
         spec={spec}
         status={status}
         focused={focused}
