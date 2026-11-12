@@ -38,5 +38,24 @@ export function defineCogTheme(m: typeof monaco = monaco): void {
   set('editorIndentGuide.background1', 'line')
   set('editorWidget.background', 'surface')
   set('editorWidget.border', 'line')
-  m.editor.defineTheme('cog', { base: 'vs-dark', inherit: true, rules: [], colors })
+  // Brackets: quiet ink, then steel, then focus (Monaco's default pair colours are yellow/pink/blue).
+  set('editorBracketHighlight.foreground1', 'ink-muted')
+  set('editorBracketHighlight.foreground2', 'steel')
+  set('editorBracketHighlight.foreground3', 'focus')
+
+  // Syntax: the same five hues the panels use for meaning, so code reads on the app's palette.
+  const rules: Array<{ token: string; foreground?: string; fontStyle?: string }> = []
+  const rule = (tokens: string[], token: string, fontStyle?: string): void => {
+    const v = tok(token)
+    if (!v) return
+    for (const t of tokens) rules.push({ token: t, foreground: v.slice(1), ...(fontStyle ? { fontStyle } : {}) })
+  }
+  rule(['keyword', 'storage', 'storage.type', 'keyword.control', 'keyword.operator.new'], 'steel')
+  rule(['string', 'string.escape', 'string.key.json', 'string.value.json'], 'success')
+  rule(['number', 'constant', 'constant.language', 'constant.numeric'], 'warning')
+  rule(['comment', 'comment.doc'], 'ink-subtle', 'italic')
+  rule(['type', 'type.identifier', 'entity.name.type', 'entity.name.function', 'support.function', 'function'], 'focus')
+  rule(['delimiter', 'delimiter.bracket', 'delimiter.parenthesis', 'delimiter.square', 'delimiter.curly', 'delimiter.angle'], 'ink-muted')
+
+  m.editor.defineTheme('cog', { base: 'vs-dark', inherit: true, rules, colors })
 }
