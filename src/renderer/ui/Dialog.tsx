@@ -1,4 +1,5 @@
 import React, { useEffect, useId } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon, type IconName } from './Icon'
 import { Button } from './Button'
 
@@ -70,7 +71,10 @@ export function Dialog({
   )
   const a11y = { role: 'dialog', 'aria-modal': true, 'aria-labelledby': titleId } as const
 
-  return (
+  // Portal to <body>: a dialog opened from a panel on the canvas would otherwise
+  // sit inside the canvas transform and scale with the zoom (position: fixed
+  // resolves against a transformed ancestor). React events still bubble to the owner.
+  return createPortal(
     <div
       className={opaque ? 'cog-modal-backdrop cog-modal-backdrop--opaque' : 'cog-modal-backdrop'}
       style={zIndex !== undefined ? { zIndex } : undefined}
@@ -79,7 +83,8 @@ export function Dialog({
       {onSubmit
         ? <form className={plateCls} data-anim {...a11y} onSubmit={onSubmit}>{inner}</form>
         : <div className={plateCls} data-anim {...a11y}>{inner}</div>}
-    </div>
+    </div>,
+    document.body
   )
 }
 
