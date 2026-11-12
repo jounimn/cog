@@ -1,5 +1,9 @@
 import React, { useState } from 'react'
 import type { ScheduledPrompt } from '../../shared/types'
+import { Button, Icon } from '../ui'
+import {
+  scheduleIntervalLabel, hoursMinutes, clockTime, scheduleStatusPresentation, fireOutcomePresentation
+} from '../panel-present'
 
 interface Props {
   schedule: ScheduledPrompt
@@ -11,20 +15,6 @@ interface Props {
   onStop: () => void
 }
 
-function formatHoursMinutes(ms: number): string {
-  if (ms <= 0) return '0m'
-  const mins = Math.floor(ms / 60_000)
-  if (mins < 60) return `${mins}m`
-  const hours = Math.floor(mins / 60)
-  const remMin = mins % 60
-  return remMin === 0 ? `${hours}h` : `${hours}h ${remMin}m`
-}
-
-function formatClock(ts: number): string {
-  const d = new Date(ts)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
 export function ScheduleRow({ schedule, agentName, tabName, now, onPause, onResume, onStop }: Props): React.ReactElement {
   const [showHistory, setShowHistory] = useState(false)
 
@@ -34,73 +24,70 @@ export function ScheduleRow({ schedule, agentName, tabName, now, onPause, onResu
     : Math.max(0, schedule.expiresAt - now)
   const timeToNext = Math.max(0, schedule.nextFireAt - now)
 
-  const intervalDisplay = schedule.intervalMinutes >= 60 && schedule.intervalMinutes % 60 === 0
-    ? `${schedule.intervalMinutes / 60}h`
-    : `${schedule.intervalMinutes}min`
+  const intervalDisplay = scheduleIntervalLabel(schedule.intervalMinutes)
+  const st = scheduleStatusPresentation(schedule.status)
+  const byAgent = schedule.createdBy && schedule.createdBy !== 'user'
 
   return (
-    <div style={{
-      background: '#2a2a2a', border: '1px solid #333', borderRadius: 4,
-      padding: 10, display: 'flex', flexDirection: 'column', gap: 4,
-      opacity: isPaused ? 0.6 : 1
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ color: '#e0e0e0', fontSize: 13, fontWeight: 600 }}>
-          📅 {schedule.name}
-          {schedule.createdBy && schedule.createdBy !== 'user'
-            ? <span title={`Created by ${schedule.createdBy}`} style={{ fontSize: 11, color: '#9aa', marginLeft: 6 }}>
-                🤖 {schedule.createdBy}
-              </span>
-            : <span title="Created by you" style={{ fontSize: 11, color: '#9aa', marginLeft: 6 }}>👤 you</span>}
-        </span>
-        <div style={{ display: 'flex', gap: 4 }}>
+    <article className="cog-sched">
+      <div className="cog-sched__head">
+        <span className="cog-sched__icon"><Icon name="calendar-clock" size={15} /></span>
+        <span className="cog-sched__name" title={schedule.name}>{schedule.name}</span>
+        {byAgent
+          ? <span className="cog-sched__by" title={`Created by ${schedule.createdBy}`}>
+              <Icon name="bot" size={12} /><span>{schedule.createdBy}</span>
+            </span>
+          : <span className="cog-sched__by" title="Created by you"><Icon name="user" size={12} /><span>you</span></span>}
+        <div className="cog-sched__actions">
           {isPaused ? (
-            <button onClick={onResume} title="Resume" style={btnStyle}>▶</button>
+            <Button variant="icon" onClick={onResume} title="Resume" aria-label="Resume"><Icon name="play" size={14} /></Button>
           ) : (
-            <button onClick={onPause} title="Pause" style={btnStyle}>⏸</button>
+            <Button variant="icon" onClick={onPause} title="Pause" aria-label="Pause"><Icon name="pause" size={14} /></Button>
           )}
-          <button onClick={onStop} title="Stop" style={btnStyle}>■</button>
+          <Button variant="icon" onClick={onStop} title="Stop" aria-label="Stop"><Icon name="square" size={13} /></Button>
         </div>
       </div>
 
-      <span style={{ color: '#888', fontSize: 11 }}>
-        → {agentName} ({tabName})
+      <span className="cog-sched__line">
+        <span className={`cog-sched__state cog-tone-${st.tone}`}><Icon name={st.icon} size={12} />{st.word}</span>
+        {' · '}To {agentName} ({tabName})
       </span>
 
-      <span style={{ color: '#999', fontSize: 11 }}>
-        Every {intervalDisplay} · {timeLeft === null ? '∞ running' : `${formatHoursMinutes(timeLeft)} left`}
+      <span className="cog-sched__line">
+        Every <span className="cog-mono">{intervalDisplay}</span> · {timeLeft === null
+          ? 'runs until stopped'
+          : <><span className="cog-mono">{hoursMinutes(timeLeft)}</span> left</>}
       </span>
 
       {!isPaused && (
-        <span style={{ color: '#999', fontSize: 11 }}>
-          Next: {formatClock(schedule.nextFireAt)} (in {formatHoursMinutes(timeToNext)})
+        <span className="cog-sched__line">
+          Next <span className="cog-mono">{clockTime(schedule.nextFireAt)}</span> (in <span className="cog-mono">{hoursMinutes(timeToNext)}</span>)
         </span>
       )}
 
       <button
+        type="button"
+        className="cog-disclosure cog-disclosure--inline"
         onClick={() => setShowHistory(v => !v)}
-        style={{
-          background: 'transparent', color: '#888', border: 'none',
-          padding: 0, cursor: 'pointer', fontSize: 11, textAlign: 'left'
-        }}
+        aria-expanded={showHistory}
       >
-        {showHistory ? '▲' : '▼'} History ({schedule.fireHistory.length})
+        <Icon name={showHistory ? 'chevron-down' : 'chevron-right'} size={12} />
+        History <span className="cog-disclosure__count">{schedule.fireHistory.length}</span>
       </button>
 
       {showHistory && schedule.fireHistory.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingLeft: 8 }}>
-          {[...schedule.fireHistory].reverse().map((entry, i) => (
-            <span key={i} style={{ color: '#777', fontSize: 10 }}>
-              {entry.outcome === 'fired' ? '✅' : '⚠'} {formatClock(entry.timestamp)} — {entry.outcome === 'fired' ? 'fired' : 'agent offline'}
-            </span>
-          ))}
-        </div>
+        <ul className="cog-sched__history">
+          {[...schedule.fireHistory].reverse().map((entry, i) => {
+            const o = fireOutcomePresentation(entry.outcome)
+            return (
+              <li key={i}>
+                <span className="cog-mono">{clockTime(entry.timestamp)}</span>
+                <span className={`cog-tone-${o.tone}`}><Icon name={o.icon} size={12} />{o.word}</span>
+              </li>
+            )
+          })}
+        </ul>
       )}
-    </div>
+    </article>
   )
-}
-
-const btnStyle: React.CSSProperties = {
-  background: '#333', color: '#e0e0e0', border: '1px solid #444',
-  width: 24, height: 24, borderRadius: 3, cursor: 'pointer', fontSize: 11
 }

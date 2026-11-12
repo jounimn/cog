@@ -1,9 +1,10 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { MosaicPane } from './MosaicPane'
-import { renderWindowContent, windowAgent, windowStatusColor, windowTitle } from './window-content'
+import { renderWindowContent, windowAgent, windowHeading } from './window-content'
 import { edgeAt, move, setRatio, type MosaicEdge, type MosaicNode, type MosaicPath } from '../mosaic-tree'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
+import { Button, EmptyState, Icon, c } from '../ui'
 
 export interface MosaicViewProps {
   windows: WindowState[]
@@ -93,13 +94,17 @@ export function MosaicView({
   const renderPane = (win: WindowState): React.ReactElement => {
     const agent = windowAgent(win, agents)
     const maximized = win.id === maximizedId
+    const heading = windowHeading(win, agents)
     return (
       <MosaicPane
         key={win.id}
         id={win.id}
         agentName={agent?.name}
-        title={windowTitle(win, agents)}
-        statusColor={windowStatusColor(win, agents)}
+        title={heading.title}
+        icon={heading.icon}
+        spec={heading.spec}
+        status={agent?.status}
+        theme={agent?.theme}
         linkedNames={agent ? linkedAgentNames(agent, agents, links) : []}
         focused={win.id === focusedId}
         maximized={maximized}
@@ -242,7 +247,7 @@ export function MosaicView({
           style={{
             flex: `0 0 ${DIVIDER}px`,
             cursor: row ? 'col-resize' : 'row-resize',
-            backgroundColor: '#1a1a1a',
+            backgroundColor: c('line'),
             touchAction: 'none'
           }}
         />
@@ -255,19 +260,17 @@ export function MosaicView({
 
   return (
     <div style={{
-      flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', backgroundColor: '#111', padding: DIVIDER, boxSizing: 'border-box',
+      flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden', backgroundColor: c('canvas'), padding: DIVIDER, boxSizing: 'border-box',
       // No text selection in the panes while one is being dragged.
       userSelect: draggingId ? 'none' : undefined
     }}>
       {maximizedWin ? (
         renderPane(maximizedWin)
       ) : windows.length === 0 ? (
-        <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', color: '#666', fontSize: '13px' }}>
-          <span>No windows in this workspace yet.</span>
-          <button onClick={onSpawnClick} style={{
-            height: '30px', padding: '0 14px', borderRadius: '6px', border: '1px solid #444',
-            backgroundColor: '#2a2a2a', color: '#4caf50', fontSize: '12px', cursor: 'pointer'
-          }}>Spawn agent</button>
+        <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <EmptyState icon="panels" action={<Button onClick={onSpawnClick}><Icon name="plus" size={14} />Spawn agent</Button>}>
+            No windows in this workspace yet.
+          </EmptyState>
         </div>
       ) : shownTree ? (
         renderNode(shownTree, [])
@@ -277,9 +280,9 @@ export function MosaicView({
         return (
           <div style={{
             position: 'fixed', left: p.left, top: p.top, width: p.width, height: p.height,
-            background: 'rgba(70, 130, 255, 0.18)',
-            border: '1px solid rgba(120, 170, 255, 0.75)',
-            boxShadow: 'inset 0 0 0 1px rgba(180, 210, 255, 0.35)',
+            background: c('focus', 0.18),
+            border: `1px solid ${c('focus', 0.75)}`,
+            boxShadow: `inset 0 0 0 1px ${c('focus', 0.35)}`,
             pointerEvents: 'none', zIndex: 99997
           }} />
         )

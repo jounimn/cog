@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import type { AgentConfig, AgentState } from '../../shared/types'
 import { defaultWorktreeForRole } from '../../shared/agent-worktree-defaults'
+import { Button, Dialog } from '../ui'
 import { AgentConfigForm, buildSubmitConfig, emptyFormValue, CLI_MODELS, OPENCLAUDE_PROVIDERS, type AgentConfigFormValue } from './AgentConfigForm'
 
 interface EditAgentDialogProps {
@@ -116,61 +117,33 @@ export function EditAgentDialog({ agent, onClose }: EditAgentDialogProps): React
   }
 
   return (
-    <div style={overlayStyle}>
-      <form onSubmit={handleSubmit} style={formStyle}>
-        <h2 style={{ margin: 0, fontSize: '16px', color: '#e0e0e0' }}>
-          Edit Agent — <span style={{ color: '#888' }}>{agent.name}</span>
-        </h2>
-        <AgentConfigForm value={form} onChange={setForm} errors={errors} hideSpawnAsleep />
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
-          <button type="button" onClick={handleCancel} style={cancelBtnStyle} disabled={submitting}>Cancel</button>
-          <button type="submit" disabled={!form.name.trim() || submitting} style={saveBtnStyle}>
+    <Dialog
+      title={<>Edit agent — <span className="cog-dialog__title-sub">{agent.name}</span></>}
+      icon="pencil"
+      size="sm"
+      zIndex={99999}
+      onClose={submitting ? undefined : handleCancel}
+      onSubmit={handleSubmit}
+      footer={
+        <>
+          <Button variant="ghost" onClick={handleCancel} disabled={submitting}>Cancel</Button>
+          <Button type="submit" disabled={!form.name.trim() || submitting}>
             {submitting ? 'Respawning…' : 'Save & Respawn'}
-          </button>
-        </div>
+          </Button>
+        </>
+      }
+    >
+      <AgentConfigForm value={form} onChange={setForm} errors={errors} hideSpawnAsleep />
 
-        {busyConfirm && (
-          <div style={busyConfirmStyle}>
-            <div style={{ fontSize: '13px', color: '#e0e0e0', marginBottom: '8px' }}>
-              Agent is busy — kill and respawn anyway?
-            </div>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button type="button" onClick={() => setBusyConfirm(false)} style={cancelBtnStyle}>Cancel</button>
-              <button type="button" onClick={() => void performRespawn()} style={saveBtnStyle}>Kill and respawn</button>
-            </div>
+      {busyConfirm && (
+        <div className="cog-dialog__overlay" role="alertdialog" aria-label="Agent is busy">
+          <p>Agent is busy — kill and respawn anyway?</p>
+          <div className="cog-dialog__overlay-actions">
+            <Button variant="ghost" onClick={() => setBusyConfirm(false)}>Cancel</Button>
+            <Button className="cog-tone-danger" onClick={() => void performRespawn()}>Kill and respawn</Button>
           </div>
-        )}
-      </form>
-    </div>
+        </div>
+      )}
+    </Dialog>
   )
-}
-
-const overlayStyle: React.CSSProperties = {
-  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-  backgroundColor: 'rgba(0,0,0,0.7)',
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  zIndex: 99999
-}
-
-const formStyle: React.CSSProperties = {
-  backgroundColor: '#1e1e1e', border: '1px solid #333', borderRadius: '8px',
-  padding: '24px', width: '450px', display: 'flex', flexDirection: 'column', gap: '12px',
-  position: 'relative'
-}
-
-const cancelBtnStyle: React.CSSProperties = {
-  padding: '8px 16px', backgroundColor: '#2a2a2a', border: '1px solid #444',
-  borderRadius: '4px', color: '#aaa', cursor: 'pointer', fontSize: '13px'
-}
-
-const saveBtnStyle: React.CSSProperties = {
-  padding: '8px 16px', backgroundColor: '#2d4a5a', border: '1px solid #4c8aaf',
-  borderRadius: '4px', color: '#8cc4e0', cursor: 'pointer', fontSize: '13px'
-}
-
-const busyConfirmStyle: React.CSSProperties = {
-  position: 'absolute', inset: '50% 24px auto 24px',
-  transform: 'translateY(-50%)',
-  backgroundColor: '#2a1e1e', border: '1px solid #6c3030', borderRadius: '6px',
-  padding: '16px', boxShadow: '0 8px 24px rgba(0,0,0,0.6)'
 }

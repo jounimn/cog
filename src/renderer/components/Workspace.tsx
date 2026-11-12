@@ -3,13 +3,25 @@ import { FloatingWindow } from './FloatingWindow'
 import { LinkOverlay } from './LinkOverlay'
 import { SnapPreview } from './SnapPreview'
 import { TrollboxThemeMenu } from './trollbox/TrollboxThemeMenu'
+import { CanvasGround } from './CanvasGround'
+import { Rulers } from './Rulers'
+import { c } from '../ui/tokens'
 import { ZoomControls } from './ZoomControls'
+import { Minimap } from './Minimap'
+import { visibleRange } from '../ruler'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import type { SnapBounds, SnapZoneInfo, WindowBounds } from '../hooks/useSnapZones'
-import { clientToCanvas } from '../canvas-math'
+import { clientToCanvas, headerScale } from '../canvas-math'
+import { useAppearance } from '../appearance-store'
+import { resolveAppearance } from '../terminal-appearance'
 import { getPanelType } from '../panel-ids'
-import { renderWindowContent, windowAgent, windowStatusColor, windowTitle } from './window-content'
+import { renderWindowContent, windowAgent, windowHeading } from './window-content'
+import { topVisibleWindow } from '../window-stack'
+
+/** Layout colour sent to remote clients, which have no CSS tokens; keeps the previous grey. */
+// wire format: remote clients parse #rrggbb — exempt from the token rule
+const REMOTE_FALLBACK_COLOR = '#888888'
 
 interface WorkspaceProps {
   windows: WindowState[]
@@ -18,7 +30,7 @@ interface WorkspaceProps {
   zoom: number
   pan: { x: number; y: number }
   links: Array<{ from: string; to: string }>
-  groups: Array<{ id: string; color: string; members: string[] }>
+  groups: Array<{ id: string; name?: string; color: string; members: string[] }>
   onAddLink: (from: string, to: string) => void
   onRemoveLink: (from: string, to: string) => void
   onSetZoom: (level: number) => void
@@ -65,6 +77,7 @@ export function Workspace({
   fitRequest
 }: WorkspaceProps): React.ReactElement {
   const viewportRef = useRef<HTMLDivElement>(null)
+  const appearance = useAppearance()
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef({ x: 0, y: 0 })
   const [transitionEnabled, setTransitionEnabled] = useState(false)
@@ -75,6 +88,8 @@ export function Workspace({
   const [restoreBoundsById, setRestoreBoundsById] = useState<Map<string, SnapBounds>>(new Map())
   const [linkDrawing, setLinkDrawing] = useState(false)
   const [linkFromAgent, setLinkFromAgent] = useState<string | null>(null)
+  // The focused window is the top one: focusing bumps its zIndex.
+  const focusedWindowId = topVisibleWindow(windows)?.id
   const [linkFromPos, setLinkFromPos] = useState<{ x: number; y: number } | null>(null)
   const [linkMousePos, setLinkMousePos] = useState<{ x: number; y: number } | null>(null)
 
@@ -131,7 +146,7 @@ export function Workspace({
           y: w.y,
           width: w.width,
           height: w.height,
-          color: agent?.theme?.chrome ?? group?.color ?? '#888888'
+          color: agent?.theme?.chrome ?? group?.color ?? REMOTE_FALLBACK_COLOR
         }
       })
       window.electronAPI.syncWorkshopLayout(layouts)
@@ -348,7 +363,7 @@ export function Workspace({
         flex: 1,
         position: 'relative',
         overflow: 'hidden',
-        backgroundColor: '#111',
+        backgroundColor: c('canvas'),
         cursor: isPanning ? 'grabbing' : 'default'
       }}
       onMouseDown={handleMouseDown}
@@ -356,6 +371,8 @@ export function Workspace({
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
+      <CanvasGround zoom={zoom} pan={pan} width={workspaceSize.width} height={workspaceSize.height} />
+
       {/* Canvas — transformed by zoom/pan */}
       <div
         data-canvas
@@ -365,14 +382,17 @@ export function Workspace({
           transition: transitionEnabled ? 'transform 0.2s ease' : 'none',
           position: 'absolute',
           top: 0,
-          left: 0
-        }}
+          left: 0,
+          // Plate headers counter-scale below 0.75 so they stay readable (see headerScale)
+          ['--plate-ui' as string]: headerScale(zoom)
+        } as React.CSSProperties}
       >
         <LinkOverlay
           links={links}
           groups={groups}
           windows={windows}
           agents={agents}
+          activeTabId={activeTabId}
           zoom={zoom}
           pan={pan}
           drawing={linkDrawing}
@@ -383,8 +403,7 @@ export function Workspace({
         {windows.map(win => {
           const panelType = getPanelType(win.id)
           const agent = windowAgent(win, agents)
-          const statusColor = windowStatusColor(win, agents)
-          const title = windowTitle(win, agents)
+          const { title, spec, icon } = windowHeading(win, agents)
 
           const content = renderWindowContent(win, { agents, tabs, activeTabId })
 
@@ -397,7 +416,9 @@ export function Workspace({
               <FloatingWindow
                 id={win.id}
                 title={title}
-                statusColor={statusColor}
+                icon={icon}
+                spec={spec}
+                focused={win.id === focusedWindowId}
                 x={win.x}
                 y={win.y}
                 width={win.width}
@@ -427,7 +448,9 @@ export function Workspace({
                 onSnapPreviewChange={setSnapPreview}
                 onSnap={(bounds, restoreBounds) => handleSnap(win.id, bounds, restoreBounds)}
                 isAgent={!!agent}
-                groupColor={agent ? groups.find(g => g.members.includes(agent.name))?.color : undefined}
+                bodyBg={agent && !agent.name.startsWith('rac-')
+                  ? resolveAppearance(appearance, agent.name, agent.theme).xterm.background
+                  : undefined}
                 onLinkDragStart={agent ? (e: React.MouseEvent) => handleLinkDragStart(agent.name, e) : undefined}
                 theme={agent?.theme}
                 agentId={agent?.id}
@@ -451,16 +474,32 @@ export function Workspace({
         })}
       </div>
 
+      <Rulers zoom={zoom} pan={pan} width={workspaceSize.width} height={workspaceSize.height} />
+
       <SnapPreview bounds={snapPreview?.bounds ?? null} />
 
       {/* Zoom controls — outside canvas transform */}
-      <ZoomControls
+      {!maximizedId && <ZoomControls
         zoom={zoom}
+        range={visibleRange(zoom, pan, workspaceSize.width, workspaceSize.height)}
         onZoomIn={() => onSetZoom(Math.min(2.0, zoom + 0.1))}
         onZoomOut={() => onSetZoom(Math.max(0.25, zoom - 0.1))}
         onReset={handleReset}
         onFitAll={handleFitAll}
-      />
+      />}
+
+      {!maximizedId && <Minimap
+        windows={windows}
+        links={links}
+        agents={agents}
+        focusedWindowId={focusedWindowId}
+        zoom={zoom}
+        pan={pan}
+        viewportWidth={workspaceSize.width}
+        viewportHeight={workspaceSize.height}
+        sheetName={tabs.find(t => t.id === activeTabId)?.name ?? 'Workspace'}
+        onSetPan={onSetPan}
+      />}
     </div>
   )
 }

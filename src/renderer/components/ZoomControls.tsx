@@ -1,48 +1,52 @@
 import React from 'react'
+import { Button, Icon, c, font } from '../ui'
 
 interface ZoomControlsProps {
   zoom: number
+  /** Visible world range, shown beside the zoom readout. */
+  range: { x0: number; x1: number; y0: number; y1: number }
   onZoomIn: () => void
   onZoomOut: () => void
   onReset: () => void
   onFitAll: () => void
 }
 
-export function ZoomControls({ zoom, onZoomIn, onZoomOut, onReset, onFitAll }: ZoomControlsProps): React.ReactElement {
+/** Fit and 1:1 sit in the bar without frames of their own, as in the audition's .zoombar. */
+const borderless: React.CSSProperties = { borderColor: 'transparent' }
+
+const num = (n: number): string => String(n).replace('-', '−')
+
+export function ZoomControls({ zoom, range, onZoomIn, onZoomOut, onReset, onFitAll }: ZoomControlsProps): React.ReactElement {
+  const sep = <span aria-hidden="true" style={{ width: 1, height: 22, margin: '0 3px', flex: 'none', background: c('line') }} />
   return (
-    <div style={{
-      position: 'absolute',
-      bottom: 12,
-      right: 12,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '4px',
-      backgroundColor: '#1e1e1e',
-      border: '1px solid #333',
-      borderRadius: '6px',
-      padding: '4px 8px',
-      zIndex: 99999,
-      userSelect: 'none'
-    }}>
-      <button onClick={onZoomOut} style={zoomBtnStyle} title="Zoom out">−</button>
-      <span style={{ color: '#aaa', fontSize: '11px', minWidth: '36px', textAlign: 'center' }}>
+    <div
+      role="toolbar"
+      aria-label="Zoom"
+      style={{
+        position: 'absolute', left: 40, bottom: 12, zIndex: 99999,
+        display: 'flex', alignItems: 'center', gap: 2, height: 38, padding: '0 3px',
+        background: c('surface'), border: `1px solid ${c('line-strong')}`, borderRadius: 'var(--r)',
+        userSelect: 'none'
+      }}
+    >
+      <Button variant="icon" onClick={onZoomOut} aria-label="Zoom out" title="Zoom out"><Icon name="minus" /></Button>
+      <output
+        aria-live="polite"
+        style={{ minWidth: 58, textAlign: 'center', font: `800 16px/1 ${font.instrument}`, color: c('ink'), letterSpacing: '0.03em' }}
+      >
         {Math.round(zoom * 100)}%
+      </output>
+      <Button variant="icon" onClick={onZoomIn} aria-label="Zoom in" title="Zoom in"><Icon name="plus" /></Button>
+      {sep}
+      <Button onClick={onFitAll} title="Fit all (Ctrl+Shift+0)" style={borderless}><Icon name="scan" size={14} />Fit</Button>
+      <Button onClick={onReset} title="Reset zoom (Ctrl+0)" style={borderless}>1:1</Button>
+      {sep}
+      <span
+        aria-label="Visible range"
+        style={{ padding: '0 8px', font: `400 11px/1 ${font.mono}`, color: c('ink-subtle'), whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+      >
+        {`x ${num(range.x0)}…${num(range.x1)}  y ${num(range.y0)}…${num(range.y1)}`}
       </span>
-      <button onClick={onZoomIn} style={zoomBtnStyle} title="Zoom in">+</button>
-      <div style={{ width: '1px', height: '16px', backgroundColor: '#444', margin: '0 4px' }} />
-      <button onClick={onReset} style={zoomBtnStyle} title="Reset zoom (Ctrl+0)">1:1</button>
-      <button onClick={onFitAll} style={zoomBtnStyle} title="Fit all (Ctrl+Shift+0)">Fit</button>
     </div>
   )
-}
-
-const zoomBtnStyle: React.CSSProperties = {
-  background: 'none',
-  border: '1px solid #444',
-  borderRadius: '3px',
-  color: '#aaa',
-  cursor: 'pointer',
-  padding: '2px 8px',
-  fontSize: '13px',
-  fontFamily: 'inherit'
 }

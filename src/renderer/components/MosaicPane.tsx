@@ -1,11 +1,20 @@
 import React from 'react'
+import type { AgentStatus, AgentTheme } from '../../shared/types'
+import { PlateHeader, PlateTicks, plateAccent, type PlateSpec } from './PlateHeader'
+import { c, type IconName } from '../ui'
 
 export interface MosaicPaneProps {
   id: string
   /** The agent's name for agent panes: lets an agent pill be dropped here to link (like a canvas window). */
   agentName?: string
   title: string
-  statusColor?: string
+  /** Lucide icon before the title (the Sketchpad's book). */
+  icon?: IconName
+  /** Agent cli and model, shown under the name. */
+  spec?: PlateSpec[]
+  status?: AgentStatus
+  /** The agent's theme; a non-default one tints the header and frame. */
+  theme?: AgentTheme
   /** Agents linked to this one; the header shows `⇄ N`, names in the tooltip. */
   linkedNames: string[]
   focused: boolean
@@ -20,12 +29,12 @@ export interface MosaicPaneProps {
   children: React.ReactNode
 }
 
-/** One tile of the Mosaic view: a FloatingWindow-style title bar over the window's content. */
+/** One tile of the Mosaic view: a FloatingWindow-style plate header over the window's content. */
 export function MosaicPane({
-  id, agentName, title, statusColor, linkedNames, focused, maximized,
+  id, agentName, title, icon, spec, status, theme, linkedNames, focused, maximized,
   onFocus, onToggleMaximize, onClose, onHeaderPointerDown, dragging, children
 }: MosaicPaneProps): React.ReactElement {
-  const stop = (e: React.SyntheticEvent): void => e.stopPropagation()
+  const accent = plateAccent(theme)
   return (
     <div
       data-mosaic-leaf={id}
@@ -33,74 +42,42 @@ export function MosaicPane({
       onPointerDownCapture={onFocus}
       style={{
         ...paneStyle,
-        border: `1px solid ${focused ? FOCUS_COLOR : '#333'}`
+        border: `1px solid ${accent?.border ?? (focused ? c('steel') : c('line-strong'))}`
       }}
     >
-      <div style={dragging ? { ...headerStyle, opacity: 0.5 } : headerStyle} onDoubleClick={onToggleMaximize} onPointerDown={onHeaderPointerDown}>
-        {statusColor && <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: statusColor, marginRight: 8, flexShrink: 0 }} />}
-        <span style={titleStyle}>{title}</span>
-        {linkedNames.length > 0 && (
-          <span title={linkedNames.join(', ')} style={{ fontSize: '11px', color: '#8cc4ff', marginRight: 4, flexShrink: 0 }}>
+      <PlateHeader
+        title={title}
+        icon={icon}
+        spec={spec}
+        status={status}
+        focused={focused}
+        accent={accent}
+        maximized={maximized}
+        onMaximize={onToggleMaximize}
+        onClose={onClose}
+        onDoubleClick={onToggleMaximize}
+        onPointerDown={onHeaderPointerDown}
+        style={dragging ? { opacity: 0.5 } : undefined}
+        extra={linkedNames.length > 0 ? (
+          <span title={linkedNames.join(', ')} style={{ fontSize: '11px', color: c('steel'), marginRight: 4, flexShrink: 0 }}>
             {`⇄ ${linkedNames.length}`}
           </span>
-        )}
-        <button
-          onPointerDown={stop} onMouseDown={stop} onDoubleClick={stop}
-          onClick={onToggleMaximize}
-          title={maximized ? 'Restore' : 'Maximize'}
-          style={btnStyle}
-        >{maximized ? '❐' : '□'}</button>
-        <button
-          onPointerDown={stop} onMouseDown={stop} onDoubleClick={stop}
-          onClick={onClose}
-          title="Close"
-          style={{ ...btnStyle, color: '#e55' }}
-        >✕</button>
-      </div>
+        ) : undefined}
+      />
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>{children}</div>
+      {focused && <PlateTicks inset />}
     </div>
   )
 }
 
-const FOCUS_COLOR = '#4a9eff'
-
 const paneStyle: React.CSSProperties = {
+  position: 'relative',
   width: '100%',
   height: '100%',
   display: 'flex',
   flexDirection: 'column',
   boxSizing: 'border-box',
-  borderRadius: '6px',
+  borderRadius: 'var(--r)',
   overflow: 'hidden',
-  backgroundColor: '#0d0d0d'
-}
-
-const headerStyle: React.CSSProperties = {
-  height: '32px',
-  backgroundColor: '#1e1e1e',
-  display: 'flex',
-  alignItems: 'center',
-  padding: '0 10px',
-  userSelect: 'none',
-  flexShrink: 0
-}
-
-const titleStyle: React.CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  fontSize: '12px',
-  color: '#ccc',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap'
-}
-
-const btnStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: '#888',
-  cursor: 'pointer',
-  padding: '0 6px',
-  fontSize: '14px',
-  lineHeight: '32px'
+  backgroundColor: c('surface')
 }

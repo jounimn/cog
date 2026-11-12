@@ -1,9 +1,11 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { AutonomySettings } from './AutonomySettings'
 import QRCode from 'qrcode-svg'
 import type { SleepSettings, AgentState, WorkspaceTheme, CommunityThemeListItem, CommunityTheme, AgentTheme, TelegramStatus, TelegramTopicsStatus, NotificationThreshold } from '../../shared/types'
 import { parseSleepNumber } from '../sleep-ui'
-import { ROLE_THEME_DEFAULTS, getPresetById, THEME_PRESETS, WORKSPACE_THEMES, getWorkspaceThemeById } from '../themes'
+import { ROLE_THEME_DEFAULTS, getPresetById, THEME_PRESETS, WORKSPACE_THEMES, getWorkspaceThemeById, DEFAULT_THEME } from '../themes'
+import { Button, Checkbox, CogMark, Dialog, Icon, Input, Row, SectionHeader, Segmented, Select, c } from '../ui'
+import { SETTINGS_SECTIONS, SETTINGS_SECTION_ORDER, isScrolledToEnd, pickActiveSection, type SettingsSectionId } from './settings-sections'
 
 declare const electronAPI: {
   getSettings: () => Promise<Record<string, any>>
@@ -24,6 +26,53 @@ interface SettingsDialogProps {
   onClose: () => void
   agents?: AgentState[]
 }
+
+/** A setting with its label and help on the left and its control on the right. */
+function SettingItem({ label, help, children, stack, className }: {
+  label: React.ReactNode
+  help?: React.ReactNode
+  children?: React.ReactNode
+  stack?: boolean
+  className?: string
+}): React.ReactElement {
+  const cls = ['cog-settings__item', stack && 'cog-settings__item--stack', className].filter(Boolean).join(' ')
+  return (
+    <div className={cls}>
+      <div className="cog-settings__text">
+        <span className="cog-settings__label">{label}</span>
+        {help != null && <span className="cog-settings__help">{help}</span>}
+      </div>
+      {children != null && <div className="cog-settings__control">{children}</div>}
+    </div>
+  )
+}
+
+/** A toggle: the kit Checkbox with its label, help below. */
+function SettingCheck({ checked, onChange, label, help, disabled }: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label: React.ReactNode
+  help?: React.ReactNode
+  disabled?: boolean
+}): React.ReactElement {
+  return (
+    <div className="cog-settings__check">
+      <Checkbox checked={checked} onChange={onChange} disabled={disabled}>{label}</Checkbox>
+      {help != null && <span className="cog-dialog__checkhint">{help}</span>}
+    </div>
+  )
+}
+
+const TIMEOUT_OPTIONS = [
+  ...['1', '2', '4', '8', '12', '24'].map(v => ({ value: v, label: `${v}h` })),
+  { value: 'custom', label: 'Custom' }
+]
+
+const RESPAWN_OPTIONS = [
+  { value: 'active', label: 'Active workspace only' },
+  { value: 'all', label: 'All workspaces' },
+  { value: 'none', label: "Don't respawn" }
+]
 
 export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): React.ReactElement {
   const [themeApplyMsg, setThemeApplyMsg] = useState<string | null>(null)
@@ -82,14 +131,15 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
     const name = customThemeName.trim()
     if (!name || agents.length === 0) return
     const roleColors: Record<string, Required<import('../../shared/types').AgentTheme>> = {}
-    let fallbackTheme = { chrome: '#1e1e1e', border: '#333333', bg: '#0d0d0d', text: '#e0e0e0' }
+    // Agent theme data: the same defaults as DEFAULT_THEME.
+    let fallbackTheme = { chrome: DEFAULT_THEME.chrome, border: DEFAULT_THEME.border, bg: DEFAULT_THEME.bg, text: DEFAULT_THEME.text }
     for (const agent of agents) {
       if (agent.theme) {
         const full = {
-          chrome: agent.theme.chrome ?? '#1e1e1e',
-          border: agent.theme.border ?? '#333333',
-          bg: agent.theme.bg ?? '#0d0d0d',
-          text: agent.theme.text ?? '#e0e0e0'
+          chrome: agent.theme.chrome ?? DEFAULT_THEME.chrome,
+          border: agent.theme.border ?? DEFAULT_THEME.border,
+          bg: agent.theme.bg ?? DEFAULT_THEME.bg,
+          text: agent.theme.text ?? DEFAULT_THEME.text
         }
         if (agent.role) roleColors[agent.role] = full
         fallbackTheme = full
@@ -228,8 +278,9 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
         padding: 2,
         width: 220,
         height: 220,
-        color: '#e0e0e0',
-        background: '#1e1e1e',
+        // qrcode-svg writes these into inline style="fill:…", so tokens resolve
+        color: c('ink'),
+        background: c('surface'),
         ecl: plainQr ? 'L' : 'H'
       }).svg()
     } catch {
@@ -331,144 +382,128 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
     }
   }
 
+  // ---- Left list of sections: jumps within the one scrolling body ----
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const sectionEls = useRef<Partial<Record<SettingsSectionId, HTMLElement | null>>>({})
+  // Set by a click in the list until the user scrolls by hand, so a short section
+  // the jump cannot bring to the top stays highlighted.
+  const navLock = useRef(false)
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(SETTINGS_SECTION_ORDER[0])
+
+  const recomputeActive = useCallback(() => {
+    const root = scrollRef.current
+    if (!root || navLock.current) return
+    const atEnd = isScrolledToEnd(root.scrollTop, root.clientHeight, root.scrollHeight)
+    // Each section's top relative to the body's top: the nearest one is what is being read.
+    const rootTop = root.getBoundingClientRect().top
+    const tops: Partial<Record<string, number>> = {}
+    for (const id of SETTINGS_SECTION_ORDER) {
+      const el = sectionEls.current[id]
+      if (el) tops[id] = el.getBoundingClientRect().top - rootTop
+    }
+    setActiveSection(cur => pickActiveSection(SETTINGS_SECTION_ORDER, tops, cur, atEnd))
+  }, [])
+
+  useEffect(() => { recomputeActive() }, [recomputeActive])
+
+  const jumpTo = (id: SettingsSectionId) => {
+    navLock.current = true
+    setActiveSection(id)
+    const reduce = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    sectionEls.current[id]?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+  }
+  const releaseNavLock = () => { navLock.current = false }
+  const sectionRef = (id: SettingsSectionId) => (el: HTMLElement | null) => { sectionEls.current[id] = el }
+
   return (
-    <div style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.7)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: 100002
-    }}>
-      <div style={{
-        backgroundColor: '#1e1e1e', border: '1px solid #333', borderRadius: '8px',
-        padding: '24px', width: '440px', maxHeight: 'calc(100vh - 80px)', overflowY: 'auto',
-        display: 'flex', flexDirection: 'column', gap: '16px'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0, fontSize: '16px', color: '#e0e0e0' }}>Settings</h2>
-          <button onClick={onClose} style={{
-            background: 'none', border: 'none', color: '#666', fontSize: '24px', cursor: 'pointer', lineHeight: 1
-          }}>x</button>
-        </div>
+    <Dialog
+      title="Settings"
+      icon="settings"
+      size="lg"
+      onClose={onClose}
+      zIndex={100002}
+      className="cog-settings"
+      bodyClassName="cog-settings__body"
+      footer={<Button onClick={onClose}>Done</Button>}
+    >
+      <nav className="cog-settings__nav" aria-label="Settings sections">
+        {SETTINGS_SECTIONS.map(s => (
+          <Row
+            key={s.id}
+            title={s.label}
+            selected={activeSection === s.id}
+            current={activeSection === s.id}
+            onClick={() => jumpTo(s.id)}
+          />
+        ))}
+      </nav>
 
+      <div
+        ref={scrollRef}
+        className="cog-settings__scroll"
+        onScroll={recomputeActive}
+        onWheel={releaseNavLock}
+        onPointerDown={releaseNavLock}
+        onTouchStart={releaseNavLock}
+        onKeyDown={releaseNavLock}
+        onFocus={releaseNavLock}
+      >
         {/* Notifications section */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Notifications
-          </div>
-
-          <label style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px', backgroundColor: '#252525', borderRadius: '4px', cursor: 'pointer'
-          }}>
-            <div>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Task completion alerts</div>
-              <div style={{ fontSize: '11px', color: '#666' }}>Show a system notification when tasks are completed</div>
-            </div>
-            <div
-              onClick={() => toggle('notifications', true)}
-              style={{
-                width: 40, height: 22, borderRadius: 11,
-                backgroundColor: (settings.notifications ?? true) ? '#4caf50' : '#444',
-                position: 'relative', cursor: 'pointer', transition: 'background-color 0.2s',
-                flexShrink: 0, marginLeft: 12
-              }}
-            >
-              <div style={{
-                width: 18, height: 18, borderRadius: '50%',
-                backgroundColor: '#fff', position: 'absolute', top: 2,
-                left: (settings.notifications ?? true) ? 20 : 2,
-                transition: 'left 0.2s'
-              }} />
-            </div>
-          </label>
-
-          <label style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px', backgroundColor: '#252525', borderRadius: '4px', cursor: 'pointer'
-          }}>
-            <div>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>All tasks done alert</div>
-              <div style={{ fontSize: '11px', color: '#666' }}>Extra notification when entire pinboard is cleared</div>
-            </div>
-            <div
-              onClick={() => toggle('notifyAllDone', true)}
-              style={{
-                width: 40, height: 22, borderRadius: 11,
-                backgroundColor: (settings.notifyAllDone ?? true) ? '#4caf50' : '#444',
-                position: 'relative', cursor: 'pointer', transition: 'background-color 0.2s',
-                flexShrink: 0, marginLeft: 12
-              }}
-            >
-              <div style={{
-                width: 18, height: 18, borderRadius: '50%',
-                backgroundColor: '#fff', position: 'absolute', top: 2,
-                left: (settings.notifyAllDone ?? true) ? 20 : 2,
-                transition: 'left 0.2s'
-              }} />
-            </div>
-          </label>
-        </div>
+        <section ref={sectionRef('notifications')} data-settings-section="notifications" className="cog-settings__section">
+          <SectionHeader>Notifications</SectionHeader>
+          <SettingCheck
+            checked={settings.notifications ?? true}
+            onChange={() => toggle('notifications', true)}
+            label="Task completion alerts"
+            help="Show a system notification when tasks are completed"
+          />
+          <SettingCheck
+            checked={settings.notifyAllDone ?? true}
+            onChange={() => toggle('notifyAllDone', true)}
+            label="All tasks done alert"
+            help="Extra notification when entire pinboard is cleared"
+          />
+        </section>
 
         {/* Agents section */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid #333', paddingTop: '16px' }}>
-          <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Agents
-          </div>
-
-          <label style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
-          }}>
-            <div style={{ marginRight: 12 }}>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Respawn agents on restart</div>
-              <div style={{ fontSize: '11px', color: '#666' }}>
-                Bring your teams back when you relaunch. Agents restart fresh (re-oriented with a
-                reconnect prompt) — CLIs don&apos;t keep memory across a restart.
-              </div>
-            </div>
-            <select
+        <section ref={sectionRef('agents')} data-settings-section="agents" className="cog-settings__section">
+          <SectionHeader>Agents</SectionHeader>
+          <SettingItem
+            label="Respawn agents on restart"
+            help={<>
+              Bring your teams back when you relaunch. Agents restart fresh (re-oriented with a
+              reconnect prompt) — CLIs don&apos;t keep memory across a restart.
+            </>}
+          >
+            <Select
               value={(settings.agentRespawnMode as string) ?? 'active'}
-              onChange={async (e) => {
-                const val = e.target.value
+              options={RESPAWN_OPTIONS}
+              ariaLabel="Respawn agents on restart"
+              onChange={async (val) => {
                 await electronAPI.setSetting('agentRespawnMode', val)
                 setSettings(prev => ({ ...prev, agentRespawnMode: val }))
               }}
-              style={{
-                flexShrink: 0, backgroundColor: '#1a1a1a', color: '#e0e0e0',
-                border: '1px solid #333', borderRadius: 4, padding: '6px 8px', fontSize: 12, cursor: 'pointer'
-              }}
-            >
-              <option value="active">Active workspace only</option>
-              <option value="all">All workspaces</option>
-              <option value="none">Don&apos;t respawn</option>
-            </select>
-          </label>
+            />
+          </SettingItem>
 
-          <div style={{ fontSize: '12px', color: '#888', marginTop: 4 }}>Agent sleep (this workspace)</div>
-          {sleepSettings && (['enabled'] as const).map(() => (
-            <label key="sleep-enabled" style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
-            }}>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Put idle agents to sleep</div>
-              <input
-                type="checkbox"
-                checked={sleepSettings.enabled}
-                onChange={async (e) => setSleepSettings(await window.electronAPI.sleepSettingsSet({ enabled: e.target.checked }))}
-              />
-            </label>
-          ))}
+          <h4 className="cog-settings__sub">Agent sleep (this workspace)</h4>
+          {sleepSettings && (
+            <SettingCheck
+              checked={sleepSettings.enabled}
+              onChange={async (checked) => setSleepSettings(await window.electronAPI.sleepSettingsSet({ enabled: checked }))}
+              label="Put idle agents to sleep"
+            />
+          )}
           {sleepSettings && ([
             { key: 'sleepAfterMinutes', label: 'Sleep after (minutes idle)' },
             { key: 'memoryFloorMb', label: 'Memory floor (MB)' }
           ] as const).map(({ key, label }) => (
-            <label key={key} style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
-            }}>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>{label}</div>
-              <input
+            <SettingItem key={key} label={label}>
+              <Input
                 type="number"
+                mono
+                className="cog-settings__num"
+                aria-label={label}
                 min={0}
                 step={1}
                 value={sleepDrafts[key] ?? String(sleepSettings[key])}
@@ -478,69 +513,53 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
                 }}
                 onBlur={() => { void commitSleepDraft(key) }}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
-                style={{
-                  width: 90, backgroundColor: '#1a1a1a', color: '#e0e0e0',
-                  border: '1px solid #333', borderRadius: 4, padding: '6px 8px', fontSize: 12
-                }}
               />
-            </label>
+            </SettingItem>
           ))}
-        </div>
+        </section>
 
         {/* Workspace Themes section */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid #333', paddingTop: '16px' }}>
-          <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Themes
-          </div>
-          <div style={{ fontSize: '11px', color: '#666', lineHeight: '1.5' }}>
+        <section ref={sectionRef('themes')} data-settings-section="themes" className="cog-settings__section">
+          <SectionHeader>Themes</SectionHeader>
+          <p className="cog-settings__intro">
             Click a theme to color all agents by role. Right-click any terminal title bar to override individual agents.
-          </div>
+          </p>
 
           {/* Theme gallery */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+          <div className="cog-settings__themes">
             {allThemes.map(theme => {
               const isActive = activeWsThemeId === theme.id
               const isCustom = !WORKSPACE_THEMES.find(t => t.id === theme.id)
               const swatchColors = ['orchestrator', 'worker', 'researcher', 'reviewer'].map(
                 role => (theme.roleColors[role] ?? theme.fallback).border
               )
+              const cls = [
+                'cog-settings__theme',
+                isActive && 'cog-settings__theme--active',
+                agents.length === 0 && 'cog-settings__theme--disabled'
+              ].filter(Boolean).join(' ')
               return (
                 <div
                   key={theme.id}
+                  className={cls}
                   onClick={() => agents.length > 0 && applyWorkspaceTheme(theme)}
-                  style={{
-                    padding: '8px',
-                    backgroundColor: isActive ? '#2a2a2a' : '#1a1a1a',
-                    border: isActive ? '2px solid #3b82f6' : '1px solid #333',
-                    borderRadius: '6px',
-                    cursor: agents.length === 0 ? 'not-allowed' : 'pointer',
-                    opacity: agents.length === 0 ? 0.5 : 1,
-                    position: 'relative'
-                  }}
                 >
-                  <div style={{ fontSize: '11px', color: '#e0e0e0', marginBottom: '4px', fontWeight: isActive ? 600 : 400 }}>
-                    {theme.label}
-                  </div>
-                  <div style={{ display: 'flex', gap: '3px' }}>
+                  <div className="cog-settings__themename">{theme.label}</div>
+                  <div className="cog-settings__swatches">
+                    {/* Theme data colours */}
                     {swatchColors.map((color, i) => (
-                      <div key={i} style={{
-                        width: '16px', height: '16px', borderRadius: '50%',
-                        backgroundColor: color, border: '1px solid rgba(255,255,255,0.15)'
-                      }} />
+                      <span key={i} className="cog-settings__swatch" style={{ backgroundColor: color }} />
                     ))}
                   </div>
-                  <div style={{ fontSize: '9px', color: '#555', marginTop: '3px' }}>
-                    {theme.description}
-                  </div>
+                  <div className="cog-settings__themedesc">{theme.description}</div>
                   {isCustom && (
-                    <div
+                    <Button
+                      variant="icon"
+                      className="cog-settings__themedel"
                       onClick={e => { e.stopPropagation(); deleteCustomTheme(theme.id) }}
-                      style={{
-                        position: 'absolute', top: '4px', right: '6px',
-                        fontSize: '12px', color: '#555', cursor: 'pointer', lineHeight: 1
-                      }}
                       title="Delete custom theme"
-                    >x</div>
+                      aria-label="Delete custom theme"
+                    ><Icon name="x" size={12} /></Button>
                   )}
                 </div>
               )
@@ -548,576 +567,426 @@ export function SettingsDialog({ onClose, agents = [] }: SettingsDialogProps): R
           </div>
 
           {/* Save current + clear */}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
+          <div className="cog-settings__actions">
+            <Button
+              className="cog-settings__grow"
               onClick={() => setShowSaveCustom(!showSaveCustom)}
               disabled={agents.length === 0}
-              style={{
-                flex: 1, padding: '8px', backgroundColor: '#333', color: '#e0e0e0',
-                border: '1px solid #444', borderRadius: '4px',
-                cursor: agents.length === 0 ? 'not-allowed' : 'pointer',
-                fontSize: '12px', opacity: agents.length === 0 ? 0.5 : 1
-              }}
-            >Save current as theme</button>
-            <button
+            >Save current as theme</Button>
+            <Button
+              variant="ghost"
               onClick={clearAllThemes}
               disabled={agents.length === 0}
-              style={{
-                padding: '8px 12px', backgroundColor: '#444', color: '#e0e0e0',
-                border: 'none', borderRadius: '4px',
-                cursor: agents.length === 0 ? 'not-allowed' : 'pointer',
-                fontSize: '12px', opacity: agents.length === 0 ? 0.5 : 1
-              }}
-            >Clear all</button>
+            >Clear all</Button>
           </div>
 
           {showSaveCustom && (
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <input
-                type="text"
+            <div className="cog-settings__actions">
+              <Input
+                className="cog-settings__grow"
                 placeholder="Theme name..."
+                aria-label="Theme name"
                 value={customThemeName}
                 onChange={e => setCustomThemeName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && saveCurrentAsTheme()}
                 autoFocus
-                style={{
-                  flex: 1, padding: '6px 8px', backgroundColor: '#252525', color: '#e0e0e0',
-                  border: '1px solid #444', borderRadius: '4px', fontSize: '12px'
-                }}
               />
-              <button
+              <Button
                 onClick={saveCurrentAsTheme}
                 disabled={!customThemeName.trim()}
-                style={{
-                  padding: '6px 12px', backgroundColor: '#3b82f6', color: '#fff',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px',
-                  opacity: customThemeName.trim() ? 1 : 0.5
-                }}
-              >Save</button>
+              >Save</Button>
             </div>
           )}
 
           {themeApplyMsg && (
-            <div style={{ fontSize: '11px', color: '#6ee7b7', padding: '4px 8px', backgroundColor: '#1a2e1a', borderRadius: '4px' }}>
-              {themeApplyMsg}
+            <div className="cog-settings__msg cog-settings__msg--success" role="status">
+              <Icon name="circle-check" size={14} />{themeApplyMsg}
             </div>
           )}
 
           {/* Community themes */}
-          <div style={{ borderTop: '1px solid #2a2a2a', paddingTop: '10px', marginTop: '4px' }}>
-            <div
+          <div className="cog-settings__community">
+            <button
+              type="button"
+              className="cog-disclosure cog-disclosure--inline cog-settings__disclosure"
+              aria-expanded={showCommunityThemes}
               onClick={() => { setShowCommunityThemes(!showCommunityThemes); if (!showCommunityThemes && communityThemes.length === 0) browseCommunityThemes() }}
-              style={{ fontSize: '11px', color: '#888', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
-              <span>{showCommunityThemes ? '▾' : '▸'}</span>
-              <span style={{ textTransform: 'uppercase', letterSpacing: '0.5px' }}>Community Themes</span>
-            </div>
+              <Icon name={showCommunityThemes ? 'chevron-down' : 'chevron-right'} size={14} />
+              <span>Community themes</span>
+            </button>
 
             {showCommunityThemes && (
-              <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <button
+              <div className="cog-settings__group">
+                <div className="cog-settings__actions">
+                  <Button
+                    className="cog-settings__grow"
                     onClick={() => browseCommunityThemes(true)}
                     disabled={communityLoading}
-                    style={{
-                      flex: 1, padding: '6px', backgroundColor: '#333', color: '#e0e0e0',
-                      border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontSize: '11px',
-                      opacity: communityLoading ? 0.5 : 1
-                    }}
-                  >{communityLoading ? 'Loading...' : 'Refresh'}</button>
+                  ><Icon name="refresh-cw" size={14} />{communityLoading ? 'Loading...' : 'Refresh'}</Button>
                   {customThemes.length > 0 && (
-                    <button
+                    <Button
+                      className="cog-settings__grow"
+                      pressed={showShareForm}
                       onClick={() => setShowShareForm(!showShareForm)}
-                      style={{
-                        flex: 1, padding: '6px', backgroundColor: '#1a2e3a', color: '#7ec4f5',
-                        border: '1px solid #2a4a5a', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'
-                      }}
-                    >Share a theme</button>
+                    ><Icon name="send" size={14} />Share a theme</Button>
                   )}
                 </div>
 
                 {showShareForm && customThemes.length > 0 && (
-                  <div style={{ padding: '8px', backgroundColor: '#1a1a1a', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <div style={{ fontSize: '10px', color: '#888' }}>Share a custom theme to the community:</div>
-                    <input
-                      type="text" placeholder="Your name" value={shareAuthor}
+                  <div className="cog-settings__form">
+                    <span className="cog-settings__help">Share a custom theme to the community:</span>
+                    <Input
+                      placeholder="Your name" value={shareAuthor} aria-label="Your name"
                       onChange={e => setShareAuthor(e.target.value)}
-                      style={{ padding: '4px 8px', backgroundColor: '#252525', color: '#e0e0e0', border: '1px solid #444', borderRadius: '4px', fontSize: '11px' }}
                     />
-                    <input
-                      type="text" placeholder="Description (optional)" value={shareDescription}
+                    <Input
+                      placeholder="Description (optional)" value={shareDescription} aria-label="Description"
                       onChange={e => setShareDescription(e.target.value)}
-                      style={{ padding: '4px 8px', backgroundColor: '#252525', color: '#e0e0e0', border: '1px solid #444', borderRadius: '4px', fontSize: '11px' }}
                     />
-                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                    <div className="cog-settings__actions">
                       {customThemes.map(t => (
-                        <button
+                        <Button
                           key={t.id}
                           onClick={() => shareCommunityTheme(t)}
                           disabled={!shareAuthor.trim()}
-                          style={{
-                            padding: '4px 10px', backgroundColor: '#2a3a2a', color: '#7ef598',
-                            border: '1px solid #3a5a3a', borderRadius: '4px', cursor: shareAuthor.trim() ? 'pointer' : 'not-allowed',
-                            fontSize: '10px', opacity: shareAuthor.trim() ? 1 : 0.5
-                          }}
-                        >Share "{t.label}"</button>
+                        >Share "{t.label}"</Button>
                       ))}
                     </div>
                   </div>
                 )}
 
                 {communityError && (
-                  <div style={{ fontSize: '11px', color: '#ef4444', padding: '4px 8px' }}>{communityError}</div>
+                  <div className="cog-settings__msg cog-settings__msg--danger" role="alert">
+                    <Icon name="circle-alert" size={14} />{communityError}
+                  </div>
                 )}
 
                 {communityThemes.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '200px', overflowY: 'auto' }}>
+                  <div className="cog-dialog__list cog-settings__communitylist">
                     {communityThemes.map(item => (
-                      <div key={item.issueNumber} style={{
-                        padding: '8px', backgroundColor: '#1a1a1a', borderRadius: '6px',
-                        border: '1px solid #2a2a2a', display: 'flex', alignItems: 'center', gap: '8px'
-                      }}>
-                        <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
-                          {item.previewColors.map((color, i) => (
-                            <div key={i} style={{
-                              width: '12px', height: '12px', borderRadius: '50%',
-                              backgroundColor: color, border: '1px solid rgba(255,255,255,0.1)'
-                            }} />
-                          ))}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '11px', color: '#e0e0e0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {item.name}
-                          </div>
-                          <div style={{ fontSize: '9px', color: '#666' }}>
-                            by {item.author}
-                          </div>
-                        </div>
-                        <div
-                          onClick={() => toggleThemeStar(item.issueNumber)}
-                          style={{ fontSize: '11px', color: item.isStarredByMe ? '#eab308' : '#555', cursor: 'pointer', flexShrink: 0 }}
-                          title={item.isStarredByMe ? 'Unstar' : 'Star'}
-                        >
-                          {item.isStarredByMe ? '\u2605' : '\u2606'} {item.stars}
-                        </div>
-                        <button
-                          onClick={() => downloadCommunityTheme(item)}
-                          style={{
-                            padding: '3px 8px', backgroundColor: '#333', color: '#e0e0e0',
-                            border: '1px solid #444', borderRadius: '4px', cursor: 'pointer',
-                            fontSize: '10px', flexShrink: 0
-                          }}
-                        >Get</button>
-                      </div>
+                      <Row
+                        key={item.issueNumber}
+                        icon={
+                          <span className="cog-settings__swatches">
+                            {/* Theme data colours */}
+                            {item.previewColors.map((color, i) => (
+                              <span key={i} className="cog-settings__swatch cog-settings__swatch--sm" style={{ backgroundColor: color }} />
+                            ))}
+                          </span>
+                        }
+                        title={item.name}
+                        meta={`by ${item.author}`}
+                        actions={<>
+                          <Button
+                            variant="ghost"
+                            className={item.isStarredByMe ? 'cog-settings__star cog-settings__star--on' : 'cog-settings__star'}
+                            onClick={() => toggleThemeStar(item.issueNumber)}
+                            title={item.isStarredByMe ? 'Unstar' : 'Star'}
+                            aria-label={item.isStarredByMe ? 'Unstar' : 'Star'}
+                            pressed={item.isStarredByMe}
+                          ><Icon name="star" size={12} />{item.stars}</Button>
+                          <Button onClick={() => downloadCommunityTheme(item)}>
+                            <Icon name="download" size={14} />Get
+                          </Button>
+                        </>}
+                      />
                     ))}
                   </div>
                 )}
 
                 {!communityLoading && communityThemes.length === 0 && !communityError && (
-                  <div style={{ fontSize: '11px', color: '#666', textAlign: 'center', padding: '12px' }}>
+                  <p className="cog-settings__empty">
                     No community themes shared yet. Be the first!
-                  </div>
+                  </p>
                 )}
               </div>
             )}
           </div>
-        </div>
+        </section>
 
         {/* Remote View section */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid #333', paddingTop: '16px' }}>
-          <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Remote View <span style={{ color: '#eab308', textTransform: 'none', fontWeight: 600 }}>(experimental)</span>
-          </div>
+        <section ref={sectionRef('remote')} data-settings-section="remote" className="cog-settings__section">
+          <SectionHeader>
+            Remote view <span className="cog-settings__exp">(experimental)</span>
+          </SectionHeader>
 
-          <label style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px', backgroundColor: '#252525', borderRadius: '4px', cursor: 'pointer'
-          }}>
-            <div>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Enable Remote View</div>
-              <div style={{ fontSize: '11px', color: '#666' }}>Tunnel your workshop to a public URL via Cloudflare</div>
-            </div>
-            <div
-              onClick={toggleRemote}
-              style={{
-                width: 40, height: 22, borderRadius: 11,
-                backgroundColor: remoteState.enabled ? '#4caf50' : '#444',
-                position: 'relative', cursor: 'pointer', transition: 'background-color 0.2s',
-                flexShrink: 0, marginLeft: 12
-              }}
-            >
-              <div style={{
-                width: 18, height: 18, borderRadius: '50%',
-                backgroundColor: '#fff', position: 'absolute', top: 2,
-                left: remoteState.enabled ? 20 : 2,
-                transition: 'left 0.2s'
-              }} />
-            </div>
-          </label>
+          <SettingCheck
+            checked={remoteState.enabled}
+            onChange={() => { void toggleRemote() }}
+            label="Enable remote view"
+            help="Tunnel your workshop to a public URL via Cloudflare"
+          />
 
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
-          }}>
-            <div>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Session timeout</div>
-              <div style={{ fontSize: '11px', color: '#666' }}>How long before the remote session expires</div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: 12 }}>
-              <select
-                value={showCustomTimeout ? 'custom' : String(settings.remoteSessionTimeout ?? 8)}
-                onChange={e => handleTimeoutChange(e.target.value)}
-                style={{
-                  backgroundColor: '#333', color: '#e0e0e0', border: '1px solid #555',
-                  borderRadius: '4px', padding: '4px 8px', fontSize: '12px', cursor: 'pointer'
+          <SettingItem label="Session timeout" help="How long before the remote session expires">
+            <Select
+              value={showCustomTimeout ? 'custom' : String(settings.remoteSessionTimeout ?? 8)}
+              options={TIMEOUT_OPTIONS}
+              ariaLabel="Session timeout"
+              onChange={v => handleTimeoutChange(v)}
+            />
+            {showCustomTimeout && (
+              <Input
+                type="number"
+                mono
+                className="cog-settings__hours"
+                aria-label="Custom timeout (hours)"
+                min={1}
+                max={168}
+                value={customTimeoutHours}
+                onChange={e => handleCustomTimeoutChange(parseInt(e.target.value, 10) || 1)}
+              />
+            )}
+          </SettingItem>
+
+          <SettingItem label="Workshop passcode" help="4-digit PIN to gate Workshop mode on mobile">
+            {showPasscodeInput ? (
+              <Input
+                type="tel"
+                mono
+                className="cog-settings__pin"
+                aria-label="Workshop passcode"
+                maxLength={4}
+                autoFocus
+                placeholder="0000"
+                value={passcodeInput}
+                onChange={e => {
+                  const val = e.target.value.replace(/\D/g, '').slice(0, 4)
+                  setPasscodeInput(val)
+                  if (val.length === 4) {
+                    electronAPI.setWorkshopPasscode(val).then(r => {
+                      if (r.success) {
+                        setPasscodeSet(true)
+                        setShowPasscodeInput(false)
+                        setPasscodeInput('')
+                      }
+                    })
+                  }
                 }}
-              >
-                <option value="1">1h</option>
-                <option value="2">2h</option>
-                <option value="4">4h</option>
-                <option value="8">8h</option>
-                <option value="12">12h</option>
-                <option value="24">24h</option>
-                <option value="custom">Custom</option>
-              </select>
-              {showCustomTimeout && (
-                <input
-                  type="number"
-                  min={1}
-                  max={168}
-                  value={customTimeoutHours}
-                  onChange={e => handleCustomTimeoutChange(parseInt(e.target.value, 10) || 1)}
-                  style={{
-                    width: '52px', backgroundColor: '#333', color: '#e0e0e0', border: '1px solid #555',
-                    borderRadius: '4px', padding: '4px 6px', fontSize: '12px', textAlign: 'center'
+                onBlur={() => {
+                  if (passcodeInput.length < 4) {
+                    setShowPasscodeInput(false)
+                    setPasscodeInput('')
+                  }
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') {
+                    setShowPasscodeInput(false)
+                    setPasscodeInput('')
+                  }
+                }}
+              />
+            ) : passcodeSet ? (
+              <>
+                <Button onClick={() => setShowPasscodeInput(true)}>Change</Button>
+                <Button
+                  variant="ghost"
+                  className="cog-tone-danger"
+                  onClick={() => {
+                    electronAPI.clearWorkshopPasscode().then(r => {
+                      if (r.success) setPasscodeSet(false)
+                    })
                   }}
-                />
-              )}
-            </div>
-          </div>
-
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px', backgroundColor: '#252525', borderRadius: '4px'
-          }}>
-            <div>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Workshop passcode</div>
-              <div style={{ fontSize: '11px', color: '#666' }}>4-digit PIN to gate Workshop mode on mobile</div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, marginLeft: 12 }}>
-              {showPasscodeInput ? (
-                <input
-                  type="tel"
-                  maxLength={4}
-                  autoFocus
-                  placeholder="0000"
-                  value={passcodeInput}
-                  onChange={e => {
-                    const val = e.target.value.replace(/\D/g, '').slice(0, 4)
-                    setPasscodeInput(val)
-                    if (val.length === 4) {
-                      electronAPI.setWorkshopPasscode(val).then(r => {
-                        if (r.success) {
-                          setPasscodeSet(true)
-                          setShowPasscodeInput(false)
-                          setPasscodeInput('')
-                        }
-                      })
-                    }
-                  }}
-                  onBlur={() => {
-                    if (passcodeInput.length < 4) {
-                      setShowPasscodeInput(false)
-                      setPasscodeInput('')
-                    }
-                  }}
-                  onKeyDown={e => {
-                    if (e.key === 'Escape') {
-                      setShowPasscodeInput(false)
-                      setPasscodeInput('')
-                    }
-                  }}
-                  style={{
-                    width: '56px', backgroundColor: '#333', color: '#e0e0e0', border: '1px solid #555',
-                    borderRadius: '4px', padding: '4px 6px', fontSize: '14px', textAlign: 'center',
-                    letterSpacing: '4px', fontFamily: 'monospace'
-                  }}
-                />
-              ) : passcodeSet ? (
-                <>
-                  <button
-                    onClick={() => setShowPasscodeInput(true)}
-                    style={{
-                      padding: '4px 10px', backgroundColor: '#333', color: '#e0e0e0',
-                      border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'
-                    }}
-                  >Change</button>
-                  <button
-                    onClick={() => {
-                      electronAPI.clearWorkshopPasscode().then(r => {
-                        if (r.success) setPasscodeSet(false)
-                      })
-                    }}
-                    style={{
-                      padding: '4px 10px', backgroundColor: '#333', color: '#ef4444',
-                      border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'
-                    }}
-                  >Clear</button>
-                </>
-              ) : (
-                <button
-                  onClick={() => setShowPasscodeInput(true)}
-                  style={{
-                    padding: '4px 10px', backgroundColor: '#333', color: '#e0e0e0',
-                    border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', fontSize: '11px'
-                  }}
-                >Set passcode</button>
-              )}
-            </div>
-          </div>
+                >Clear</Button>
+              </>
+            ) : (
+              <Button onClick={() => setShowPasscodeInput(true)}>Set passcode</Button>
+            )}
+          </SettingItem>
 
           {setupProgress && (
-            <div style={{ fontSize: '12px', color: setupProgress.stage === 'error' ? '#ef4444' : '#888', padding: '8px' }}>
-              {setupProgress.stage === 'downloading' && `Downloading cloudflared... ${setupProgress.message ?? ''}`}
-              {setupProgress.stage === 'starting' && (setupProgress.message ?? 'Starting tunnel...')}
-              {setupProgress.stage === 'ready' && '✅ Tunnel ready'}
-              {setupProgress.stage === 'error' && `❌ ${setupProgress.message}`}
+            <div className={setupProgress.stage === 'error' ? 'cog-settings__status cog-tone-danger' : setupProgress.stage === 'ready' ? 'cog-settings__status cog-tone-success' : 'cog-settings__status'}>
+              {setupProgress.stage === 'downloading' && <><Icon name="loader" size={14} />{`Downloading cloudflared... ${setupProgress.message ?? ''}`}</>}
+              {setupProgress.stage === 'starting' && <><Icon name="loader" size={14} />{setupProgress.message ?? 'Starting tunnel...'}</>}
+              {setupProgress.stage === 'ready' && <><Icon name="circle-check" size={14} />Tunnel ready</>}
+              {setupProgress.stage === 'error' && <><Icon name="circle-x" size={14} />{setupProgress.message}</>}
             </div>
           )}
 
           {remoteState.enabled && remoteState.publicUrl && (
             <>
-              <div style={{ fontSize: '10px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '4px' }}>Tunnel URL (internet)</div>
-              <div style={{
-                padding: '8px', backgroundColor: '#252525', borderRadius: '4px',
-                fontSize: '11px', color: '#aaa', wordBreak: 'break-all'
-              }}>
-                {remoteState.publicUrl}
+              <div className="cog-settings__urlfield">
+                <span className="cog-settings__fieldlabel">Tunnel URL (internet)</span>
+                <div className="cog-settings__url">{remoteState.publicUrl}</div>
               </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={copyUrl} style={{
-                  flex: 1, padding: '8px', backgroundColor: '#3b82f6', color: '#fff',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px'
-                }}>📋 Copy Tunnel URL</button>
-                <button onClick={() => setShowQr(v => !v)} style={{
-                  flex: 1, padding: '8px', backgroundColor: '#444', color: '#e0e0e0',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px'
-                }}>{showQr ? '✕ Hide QR' : '📱 Show QR'}</button>
+              <div className="cog-settings__actions">
+                <Button className="cog-settings__grow" onClick={copyUrl}><Icon name="copy" size={14} />Copy tunnel URL</Button>
+                <Button className="cog-settings__grow" pressed={showQr} onClick={() => setShowQr(v => !v)}>
+                  <Icon name={showQr ? 'x' : 'qr-code'} size={14} />{showQr ? 'Hide QR' : 'Show QR'}
+                </Button>
               </div>
 
               {/* LAN access toggle + URL */}
-              <label style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '8px', backgroundColor: '#252525', borderRadius: '4px', cursor: 'pointer', marginTop: '6px'
-              }}>
-                <div>
-                  <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Enable LAN access</div>
-                  <div style={{ fontSize: '11px', color: '#666' }}>Same-WiFi devices can connect over plain HTTP — no internet needed</div>
-                </div>
-                <div
-                  onClick={async () => {
-                    if (remoteState.lanEnabled) await electronAPI.disableRemoteLan()
-                    else await electronAPI.enableRemoteLan()
-                  }}
-                  style={{
-                    width: 40, height: 22, borderRadius: 11,
-                    backgroundColor: remoteState.lanEnabled ? '#4caf50' : '#444',
-                    position: 'relative', cursor: 'pointer', transition: 'background-color 0.2s',
-                    flexShrink: 0, marginLeft: 12
-                  }}
-                >
-                  <div style={{
-                    width: 18, height: 18, borderRadius: '50%',
-                    backgroundColor: '#fff', position: 'absolute', top: 2,
-                    left: remoteState.lanEnabled ? 20 : 2,
-                    transition: 'left 0.2s'
-                  }} />
-                </div>
-              </label>
+              <SettingCheck
+                checked={remoteState.lanEnabled}
+                onChange={async () => {
+                  if (remoteState.lanEnabled) await electronAPI.disableRemoteLan()
+                  else await electronAPI.enableRemoteLan()
+                }}
+                label="Enable LAN access"
+                help="Same-WiFi devices can connect over plain HTTP — no internet needed"
+              />
 
               {remoteState.lanEnabled && remoteState.lanUrl && (
                 <>
-                  <div style={{ fontSize: '10px', color: '#6ee7b7', textTransform: 'uppercase', letterSpacing: '0.05em' }}>LAN URL (same WiFi only)</div>
-                  <div style={{
-                    padding: '8px', backgroundColor: '#1a2e1a', borderRadius: '4px',
-                    fontSize: '11px', color: '#6ee7b7', wordBreak: 'break-all', border: '1px solid #2a4a2a'
-                  }}>
-                    {remoteState.lanUrl}
+                  <div className="cog-settings__urlfield">
+                    <span className="cog-settings__fieldlabel">LAN URL (same WiFi only)</span>
+                    <div className="cog-settings__url cog-settings__url--lan">{remoteState.lanUrl}</div>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
+                  <div className="cog-settings__actions">
+                    <Button
+                      className="cog-settings__grow"
                       onClick={() => { if (remoteState.lanUrl) navigator.clipboard.writeText(remoteState.lanUrl) }}
-                      style={{
-                        flex: 1, padding: '8px', backgroundColor: '#1a2e1a', color: '#6ee7b7',
-                        border: '1px solid #2a4a2a', borderRadius: '4px', cursor: 'pointer', fontSize: '12px'
-                      }}
-                    >📋 Copy LAN URL</button>
+                    ><Icon name="copy" size={14} />Copy LAN URL</Button>
                   </div>
                 </>
               )}
 
               {/* QR source selector — only show if both URLs are available */}
               {showQr && remoteState.lanEnabled && remoteState.lanUrl && (
-                <div style={{ display: 'flex', gap: '4px', fontSize: '11px' }}>
-                  <button
-                    onClick={() => setWhichQr('tunnel')}
-                    style={{
-                      flex: 1, padding: '6px', borderRadius: '4px', cursor: 'pointer',
-                      background: whichQr === 'tunnel' ? '#3b82f6' : '#2a2a2a',
-                      color: whichQr === 'tunnel' ? '#fff' : '#888',
-                      border: whichQr === 'tunnel' ? 'none' : '1px solid #444'
-                    }}
-                  >Tunnel QR</button>
-                  <button
-                    onClick={() => setWhichQr('lan')}
-                    style={{
-                      flex: 1, padding: '6px', borderRadius: '4px', cursor: 'pointer',
-                      background: whichQr === 'lan' ? '#4caf50' : '#2a2a2a',
-                      color: whichQr === 'lan' ? '#fff' : '#888',
-                      border: whichQr === 'lan' ? 'none' : '1px solid #444'
-                    }}
-                  >LAN QR</button>
+                <div className="cog-settings__seg">
+                  <Segmented
+                    value={whichQr}
+                    ariaLabel="QR code source"
+                    options={[
+                      { value: 'tunnel', label: 'Tunnel QR' },
+                      { value: 'lan', label: 'LAN QR' }
+                    ]}
+                    onChange={setWhichQr}
+                  />
                 </div>
               )}
 
               {showQr && qrSvg && (
-                <div style={{
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', padding: '12px',
-                  backgroundColor: '#1e1e1e', borderRadius: '4px', border: '1px solid #333'
-                }}>
-                  <div style={{ position: 'relative', display: 'inline-block', lineHeight: 0 }}>
+                <div className="cog-settings__qr">
+                  <div className="cog-settings__qrimg">
                     <div dangerouslySetInnerHTML={{ __html: qrSvg }} />
                     {!plainQr && (
-                      <svg
-                        viewBox="0 0 24 24"
-                        width="46"
-                        height="46"
-                        style={{
-                          position: 'absolute',
-                          top: '50%',
-                          left: '50%',
-                          transform: 'translate(-50%, -50%)',
-                          backgroundColor: '#1e1e1e',
-                          borderRadius: '50%',
-                          padding: '5px',
-                          border: '2px solid #1e1e1e',
-                          pointerEvents: 'none'
-                        }}
-                      >
-                        <path
-                          fill="#f5d76e"
-                          d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.21,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.21,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.67 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"
-                        />
-                      </svg>
+                      <span className="cog-settings__qrlogo"><CogMark size={32} /></span>
                     )}
                   </div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#888', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={plainQr} onChange={e => setPlainQr(e.target.checked)} />
-                    <span>Plain QR (for old scanners — 3DS, feature phones)</span>
-                  </label>
-                  <div
+                  <Checkbox checked={plainQr} onChange={setPlainQr}>
+                    Plain QR (for old scanners — 3DS, feature phones)
+                  </Checkbox>
+                  <button
+                    type="button"
+                    className="cog-disclosure cog-disclosure--inline"
+                    aria-expanded={show3dsPanel}
                     onClick={() => setShow3dsPanel(!show3dsPanel)}
-                    style={{ fontSize: '11px', color: '#666', cursor: 'pointer', marginTop: '4px' }}
                   >
-                    {show3dsPanel ? '▾' : '▸'} Send to 3DS
-                  </div>
+                    <Icon name={show3dsPanel ? 'chevron-down' : 'chevron-right'} size={14} />
+                    <span>Send to 3DS</span>
+                  </button>
                   {show3dsPanel && (
-                    <div style={{ padding: '8px', background: '#1a1a1a', borderRadius: '6px', marginTop: '4px', fontSize: '12px' }}>
-                      <div style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
-                        <input
-                          type="text" placeholder="3DS IP (e.g. 192.168.2.227)"
+                    <div className="cog-settings__form cog-settings__ds">
+                      <div className="cog-settings__actions">
+                        <Input
+                          mono
+                          className="cog-settings__grow"
+                          placeholder="3DS IP (e.g. 192.168.2.227)"
+                          aria-label="3DS IP"
                           value={dsIp} onChange={e => setDsIp(e.target.value)}
-                          style={{ flex: 1, padding: '4px 8px', background: '#111', border: '1px solid #333', borderRadius: '4px', color: '#eee', fontSize: '12px' }}
                         />
-                        <input
-                          type="text" placeholder="Port"
+                        <Input
+                          mono
+                          className="cog-settings__port"
+                          placeholder="Port"
+                          aria-label="Port"
                           value={dsPort} onChange={e => setDsPort(e.target.value)}
-                          style={{ width: '60px', padding: '4px 8px', background: '#111', border: '1px solid #333', borderRadius: '4px', color: '#eee', fontSize: '12px' }}
                         />
                       </div>
-                      <div style={{ display: 'flex', gap: '6px' }}>
+                      <div className="cog-settings__actions">
                         {remoteState.lanUrl && (
-                          <button
+                          <Button
                             onClick={async () => {
                               setDsSendResult('Sending...')
                               const r = await window.electronAPI.sendTo3DS(dsIp, parseInt(dsPort) || 8336, remoteState.lanUrl!)
                               setDsSendResult(r)
                             }}
-                            style={{ padding: '4px 10px', background: '#2a5a2a', color: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}
                           >
-                            Send LAN URL
-                          </button>
+                            <Icon name="send" size={14} />Send LAN URL
+                          </Button>
                         )}
                         {remoteState.publicUrl && (
-                          <button
+                          <Button
                             onClick={async () => {
                               setDsSendResult('Sending...')
                               const r = await window.electronAPI.sendTo3DS(dsIp, parseInt(dsPort) || 8336, remoteState.publicUrl!)
                               setDsSendResult(r)
                             }}
-                            style={{ padding: '4px 10px', background: '#2a3a5a', color: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}
                           >
-                            Send Tunnel URL
-                          </button>
+                            <Icon name="send" size={14} />Send tunnel URL
+                          </Button>
                         )}
                       </div>
                       {dsSendResult && (
-                        <div style={{ fontSize: '11px', color: dsSendResult.includes('Error') || dsSendResult.includes('Timeout') ? '#ef4444' : '#6ed76e', marginTop: '4px' }}>
+                        <div className={dsSendResult.includes('Error') || dsSendResult.includes('Timeout') ? 'cog-settings__status cog-tone-danger' : 'cog-settings__status cog-tone-success'}>
                           {dsSendResult}
                         </div>
                       )}
-                      <div style={{ fontSize: '10px', color: '#555', marginTop: '4px' }}>
+                      <span className="cog-settings__help">
                         On 3DS: press L on setup screen to start listening
-                      </div>
+                      </span>
                     </div>
                   )}
                 </div>
               )}
 
-              <div style={{ fontSize: '12px', color: '#aaa' }}>
-                {remoteState.connectionCount === 0 && '⚪ No connections'}
-                {remoteState.connectionCount === 1 && '🟢 1 connection active'}
+              <div className="cog-settings__conn">
+                {remoteState.connectionCount === 0 && (
+                  <span className="cog-settings__status"><Icon name="circle" size={12} />No connections</span>
+                )}
+                {remoteState.connectionCount === 1 && (
+                  <span className="cog-settings__status cog-tone-success"><Icon name="circle-dot" size={12} />1 connection active</span>
+                )}
                 {remoteState.connectionCount > 1 && (
-                  <span style={{ color: '#ef4444' }}>🔴 {remoteState.connectionCount} connections active</span>
+                  <span className="cog-settings__status cog-tone-danger"><Icon name="circle-alert" size={12} />{remoteState.connectionCount} connections active</span>
                 )}
                 {remoteState.lastActivity && (
-                  <div style={{ fontSize: '11px', color: '#666' }}>
+                  <span className="cog-settings__help">
                     Last activity: {new Date(remoteState.lastActivity).toLocaleTimeString()}
-                  </div>
+                  </span>
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={killSessions} style={{
-                  flex: 1, padding: '8px', backgroundColor: '#ef4444', color: '#fff',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px'
-                }}>🛑 Kill all sessions</button>
-                <button onClick={regenerate} style={{
-                  flex: 1, padding: '8px', backgroundColor: '#444', color: '#e0e0e0',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px'
-                }}>🔄 Regenerate token</button>
+              <div className="cog-settings__actions">
+                <Button variant="ghost" className="cog-settings__grow cog-tone-danger" onClick={killSessions}>
+                  <Icon name="circle-x" size={14} />Kill all sessions
+                </Button>
+                <Button className="cog-settings__grow" onClick={regenerate}>
+                  <Icon name="refresh-cw" size={14} />Regenerate token
+                </Button>
               </div>
             </>
           )}
-        </div>
+        </section>
 
         {/* Telegram Bot section */}
-        <TelegramSection />
+        <section ref={sectionRef('telegram')} data-settings-section="telegram" className="cog-settings__section">
+          <TelegramSection />
+        </section>
 
         {/* Agent Autonomy section */}
-        <AutonomySettings projectName={projectName} />
+        <section ref={sectionRef('autonomy')} data-settings-section="autonomy" className="cog-settings__section">
+          <AutonomySettings projectName={projectName} />
+        </section>
 
         {/* Stream Deck section */}
-        <StreamDeckSection />
-
-        <button onClick={onClose} style={{
-          padding: '8px 16px', backgroundColor: '#2a2a2a', border: '1px solid #444',
-          borderRadius: '4px', color: '#aaa', cursor: 'pointer', fontSize: '13px', alignSelf: 'flex-end'
-        }}>Done</button>
+        <section ref={sectionRef('streamdeck')} data-settings-section="streamdeck" className="cog-settings__section">
+          <StreamDeckSection />
+        </section>
       </div>
-    </div>
+    </Dialog>
   )
 }
+
+const THRESHOLD_OPTIONS: { value: NotificationThreshold; label: string }[] = [
+  { value: 'low', label: 'Everything' },
+  { value: 'normal', label: 'Normal & up' },
+  { value: 'high', label: 'High & up' },
+  { value: 'urgent', label: 'Urgent only' },
+  { value: 'none', label: 'Nothing (off)' }
+]
 
 function TelegramSection(): React.ReactElement {
   const [status, setStatus] = React.useState<TelegramStatus | null>(null)
@@ -1196,34 +1065,29 @@ function TelegramSection(): React.ReactElement {
     await window.electronAPI.unpairTelegram(id)
   }
 
-  const rowStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '8px', backgroundColor: '#252525', borderRadius: '4px', gap: '8px'
-  }
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid #333', paddingTop: '16px' }}>
-      <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Telegram Bot <span style={{ color: '#eab308', textTransform: 'none', fontWeight: 600 }}>(experimental)</span>
-      </div>
-      <div style={{ fontSize: '11px', color: '#666', lineHeight: '1.5' }}>
-        Drive your agents from your phone: /status, /use, /msg, /output, /task — and agent replies
+    <>
+      <SectionHeader>
+        Telegram bot <span className="cog-settings__exp">(experimental)</span>
+      </SectionHeader>
+      <p className="cog-settings__intro">
+        Drive your agents from your phone: <span className="cog-mono">/status</span>, <span className="cog-mono">/use</span>, <span className="cog-mono">/msg</span>, <span className="cog-mono">/output</span>, <span className="cog-mono">/task</span> — and agent replies
         land in your chat. Create a bot with @BotFather in Telegram, paste its token, then pair.
         Works in direct messages only.
-      </div>
+      </p>
 
       {/* Bot token */}
-      <div style={rowStyle}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Bot token</div>
-          <div style={{ fontSize: '11px', color: '#666' }}>
-            {status?.hasToken ? 'Saved (stored encrypted)' : 'Paste the token from @BotFather'}
-          </div>
-        </div>
+      <SettingItem
+        label="Bot token"
+        help={status?.hasToken ? 'Saved (stored encrypted)' : 'Paste the token from @BotFather'}
+      >
         {showTokenInput ? (
-          <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
-            <input
+          <>
+            <Input
               type="password"
+              mono
+              className="cog-settings__token"
+              aria-label="Bot token"
               autoFocus
               placeholder="123456:ABC-DEF…"
               value={tokenInput}
@@ -1232,183 +1096,121 @@ function TelegramSection(): React.ReactElement {
                 if (e.key === 'Enter') saveToken()
                 if (e.key === 'Escape') { setShowTokenInput(false); setTokenInput('') }
               }}
-              style={{
-                width: '150px', padding: '4px 8px', backgroundColor: '#333', color: '#e0e0e0',
-                border: '1px solid #555', borderRadius: '4px', fontSize: '12px'
-              }}
             />
-            <button
+            <Button
               onClick={saveToken}
               disabled={!tokenInput.trim() || busy}
-              style={{
-                padding: '4px 10px', backgroundColor: '#3b82f6', color: '#fff',
-                border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px',
-                opacity: tokenInput.trim() && !busy ? 1 : 0.5
-              }}
-            >{busy ? '…' : 'Save'}</button>
-          </div>
+            >{busy ? '…' : 'Save'}</Button>
+          </>
         ) : (
-          <button
-            onClick={() => setShowTokenInput(true)}
-            style={{
-              padding: '4px 10px', backgroundColor: '#333', color: '#e0e0e0',
-              border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', flexShrink: 0
-            }}
-          >{status?.hasToken ? 'Change' : 'Set token'}</button>
+          <Button onClick={() => setShowTokenInput(true)}>{status?.hasToken ? 'Change' : 'Set token'}</Button>
         )}
-      </div>
+      </SettingItem>
 
       {/* Enable toggle */}
-      <label style={{ ...rowStyle, cursor: status?.hasToken ? 'pointer' : 'not-allowed', opacity: status?.hasToken ? 1 : 0.5 }}>
-        <div>
-          <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Enable Telegram bot</div>
-          <div style={{ fontSize: '11px', color: '#666' }}>
-            {status?.enabled ? 'Running — long-polling Telegram (no tunnel needed)' : 'Bot is off'}
-          </div>
-        </div>
-        <div
-          onClick={toggleBot}
-          style={{
-            width: 40, height: 22, borderRadius: 11,
-            backgroundColor: status?.enabled ? '#4caf50' : '#444',
-            position: 'relative', cursor: status?.hasToken ? 'pointer' : 'not-allowed',
-            transition: 'background-color 0.2s', flexShrink: 0, marginLeft: 12
-          }}
-        >
-          <div style={{
-            width: 18, height: 18, borderRadius: '50%',
-            backgroundColor: '#fff', position: 'absolute', top: 2,
-            left: status?.enabled ? 20 : 2,
-            transition: 'left 0.2s'
-          }} />
-        </div>
-      </label>
+      <SettingCheck
+        checked={!!status?.enabled}
+        disabled={!status?.hasToken}
+        onChange={() => { void toggleBot() }}
+        label="Enable Telegram bot"
+        help={status?.enabled ? 'Running — long-polling Telegram (no tunnel needed)' : 'Bot is off'}
+      />
 
       {/* Which inbox priorities get pushed to Telegram */}
-      <label style={{ ...rowStyle }}>
-        <div>
-          <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Send to Telegram when</div>
-          <div style={{ fontSize: '11px', color: '#666' }}>
-            Mirror inbox messages at or above this urgency to your phone.
-          </div>
-        </div>
-        <select
+      <SettingItem label="Send to Telegram when" help="Mirror inbox messages at or above this urgency to your phone.">
+        <Select
           value={threshold}
-          onChange={e => changeThreshold(e.target.value as NotificationThreshold)}
-          style={{
-            backgroundColor: '#1a1a1a', color: '#e0e0e0', border: '1px solid #3a3a3a',
-            borderRadius: 4, padding: '4px 8px', fontSize: 12, marginLeft: 12, flexShrink: 0
-          }}
-        >
-          <option value="low">Everything</option>
-          <option value="normal">Normal &amp; up</option>
-          <option value="high">High &amp; up</option>
-          <option value="urgent">Urgent only</option>
-          <option value="none">Nothing (off)</option>
-        </select>
-      </label>
+          options={THRESHOLD_OPTIONS}
+          ariaLabel="Send to Telegram when"
+          onChange={t => changeThreshold(t)}
+        />
+      </SettingItem>
 
       {/* Pairing — only meaningful while the bot is running */}
       {status?.enabled && (
         <>
-          <div style={rowStyle}>
-            <div>
-              <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Pair a phone</div>
-              <div style={{ fontSize: '11px', color: '#666' }}>Code is single-use and expires in 10 minutes</div>
-            </div>
+          <SettingItem label="Pair a phone" help="Code is single-use and expires in 10 minutes">
             {status.activePairingCode ? (
-              <div style={{
-                fontSize: '18px', fontFamily: 'monospace', letterSpacing: '3px',
-                color: '#6ee7b7', padding: '2px 10px', backgroundColor: '#1a2e1a',
-                borderRadius: '4px', flexShrink: 0
-              }}>{status.activePairingCode}</div>
+              <span className="cog-settings__code">{status.activePairingCode}</span>
             ) : (
-              <button
-                onClick={generateCode}
-                style={{
-                  padding: '4px 10px', backgroundColor: '#333', color: '#e0e0e0',
-                  border: '1px solid #555', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', flexShrink: 0
-                }}
-              >Generate code</button>
+              <Button onClick={generateCode}>Generate code</Button>
             )}
-          </div>
+          </SettingItem>
           {status.activePairingCode && (
-            <div style={{ fontSize: '11px', color: '#888', padding: '0 4px' }}>
-              Message your bot in Telegram: <span style={{ fontFamily: 'monospace', color: '#e0e0e0' }}>/pair {status.activePairingCode}</span>
-            </div>
+            <span className="cog-settings__help">
+              Message your bot in Telegram: <span className="cog-mono cog-settings__ink">/pair {status.activePairingCode}</span>
+            </span>
           )}
         </>
       )}
 
       {/* Paired accounts — shown even while the bot is off so unpair always works */}
       {status && status.pairedIds.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <div style={{ fontSize: '11px', color: '#666' }}>Linked Telegram accounts</div>
-          {status.pairedIds.map(id => (
-            <div key={id} style={rowStyle}>
-              <div style={{ fontSize: '12px', color: '#e0e0e0', fontFamily: 'monospace' }}>{id}</div>
-              <button
-                onClick={() => unpair(id)}
-                style={{
-                  padding: '3px 10px', backgroundColor: '#3a2222', color: '#ef8888',
-                  border: '1px solid #5a3333', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', flexShrink: 0
-                }}
-              >Unpair</button>
-            </div>
-          ))}
+        <div className="cog-settings__urlfield">
+          <span className="cog-settings__fieldlabel">Linked Telegram accounts</span>
+          <div className="cog-dialog__list">
+            {status.pairedIds.map(id => (
+              <Row
+                key={id}
+                title={<span className="cog-mono">{id}</span>}
+                actions={
+                  <Button variant="ghost" className="cog-tone-danger" onClick={() => unpair(id)}>Unpair</Button>
+                }
+              />
+            ))}
+          </div>
         </div>
       )}
 
       {error && (
-        <div style={{ fontSize: '11px', color: '#ef4444', padding: '4px 8px', backgroundColor: '#2e1a1a', borderRadius: '4px' }}>
-          {error}
+        <div className="cog-settings__msg cog-settings__msg--danger" role="alert">
+          <Icon name="circle-alert" size={14} />{error}
         </div>
       )}
       {notice && (
-        <div style={{ fontSize: '11px', color: '#6ee7b7', padding: '4px 8px', backgroundColor: '#1a2e1a', borderRadius: '4px' }}>
-          {notice}
+        <div className="cog-settings__msg cog-settings__msg--success" role="status">
+          <Icon name="circle-check" size={14} />{notice}
         </div>
       )}
 
       {/* Multi-instance guidance + optional supergroup setup */}
-      <details style={{ fontSize: '12px', color: '#aaa', backgroundColor: '#1c1c1c', border: '1px solid #2c2c2c', borderRadius: '6px', padding: '8px 10px' }}>
-        <summary style={{ cursor: 'pointer', color: '#e0e0e0', fontWeight: 600 }}>
+      <details className="cog-settings__details">
+        <summary>
+          <span className="cog-settings__chev"><Icon name="chevron-right" size={14} /></span>
           Running multiple Cogs on one bot? (read this)
         </summary>
-        <div style={{ marginTop: '8px', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div className="cog-settings__detailsbody">
           <div>
             You can run several Cog windows (different projects) on the same bot. They coordinate
             automatically: exactly one polls Telegram so <b>no messages get missed</b>, every relayed
-            message is tagged <span style={{ fontFamily: 'monospace', color: '#e0e0e0' }}>[Project]</span>,
+            message is tagged <span className="cog-mono cog-settings__ink">[Project]</span>,
             and you pick which one you're talking to:
           </div>
-          <div style={{ paddingLeft: '8px', color: '#ccc' }}>
-            <div><span style={{ fontFamily: 'monospace', color: '#e0e0e0' }}>/status</span> — every Cog + its agents</div>
-            <div><span style={{ fontFamily: 'monospace', color: '#e0e0e0' }}>/cog &lt;project&gt;</span> — switch which Cog your messages go to</div>
+          <div className="cog-settings__cmds">
+            <div><span className="cog-mono cog-settings__ink">/status</span> — every Cog + its agents</div>
+            <div><span className="cog-mono cog-settings__ink">/cog &lt;project&gt;</span> — switch which Cog your messages go to</div>
           </div>
-          <div style={{ marginTop: '4px', color: '#888' }}>
-            <b style={{ color: '#aaa' }}>Want threaded separation instead of one DM?</b> Telegram supergroups
+          <div>
+            <b>Want threaded separation instead of one DM?</b> Telegram supergroups
             with Topics give each project its own thread. To set it up: create a group → open its settings →
             turn on <b>Topics</b> → add your bot and make it an <b>admin</b> with <i>Manage Topics</i>.
             (DM mode above needs no setup and is the default.)
           </div>
 
           {/* Telegram — per-workspace threads */}
-          <div style={{ marginTop: '8px', borderTop: '1px solid #2c2c2c', paddingTop: '8px' }}>
-            <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Telegram — per-workspace threads
-            </div>
-            <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>
+          <div className="cog-settings__threads">
+            <h4 className="cog-settings__sub">Telegram — per-workspace threads</h4>
+            <div>
               Topics mode:{' '}
               {topicsStatus == null
                 ? 'checking…'
                 : topicsStatus.mode === 'topics'
-                  ? <span style={{ color: '#6ee7b7' }}>bound to supergroup {topicsStatus.supergroupChatId} ✓</span>
-                  : <span style={{ color: '#aaa' }}>DM mode</span>}
+                  ? <span className="cog-tone-success">bound to supergroup <span className="cog-mono">{topicsStatus.supergroupChatId}</span> <Icon name="check" size={12} /></span>
+                  : <span className="cog-settings__ink">DM mode</span>}
             </div>
-            <div style={{ fontSize: '11px', color: '#aaa', lineHeight: 1.6, marginTop: '4px' }}>
+            <div>
               Give each workspace its own thread in one Telegram group instead of one shared DM:
-              <ol style={{ margin: '6px 0 0 16px', padding: 0 }}>
+              <ol>
                 <li>Create a Telegram <b>supergroup</b> and turn on <b>Topics</b> (Group Settings → Topics).</li>
                 <li>Add your Cog bot as an <b>admin</b> with the <b>Manage Topics</b> permission.</li>
                 <li>In the group, send <code>/bind</code>. Each workspace then gets its own topic; closing a workspace archives its thread.</li>
@@ -1418,9 +1220,15 @@ function TelegramSection(): React.ReactElement {
           </div>
         </div>
       </details>
-    </div>
+    </>
   )
 }
+
+const WHISPER_OPTIONS = [
+  { value: 'cloud' as const, label: 'Cloud (OpenAI Whisper)' },
+  { value: 'local' as const, label: 'Local (Whisper.cpp)' },
+  { value: 'disabled' as const, label: 'Disabled' }
+]
 
 function StreamDeckSection(): React.ReactElement {
   const [sdSettings, setSdSettings] = React.useState<{ enabled: boolean; whisperBackend: 'cloud' | 'local' | 'disabled'; openaiApiKey?: string }>({ enabled: true, whisperBackend: 'cloud' })
@@ -1455,60 +1263,35 @@ function StreamDeckSection(): React.ReactElement {
     }
   }
 
-  const rowStyle: React.CSSProperties = {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '8px', backgroundColor: '#252525', borderRadius: '4px', gap: '8px'
-  }
+  const fillCls = localProgress?.stage === 'error'
+    ? 'cog-meter__fill cog-meter__fill--danger'
+    : localProgress?.stage === 'ready' ? 'cog-meter__fill cog-meter__fill--success' : 'cog-meter__fill'
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid #333', paddingTop: '16px' }}>
-      <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Stream Deck
-      </div>
+    <>
+      <SectionHeader>Stream Deck</SectionHeader>
 
-      <div style={rowStyle}>
-        <div>
-          <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Enable Stream Deck integration</div>
-          <div style={{ fontSize: '11px', color: '#666' }}>Connect a Stream Deck MK.2 for hardware controls</div>
-        </div>
-        <div
-          onClick={() => void update({ enabled: !sdSettings.enabled })}
-          style={{
-            width: 40, height: 22, borderRadius: 11,
-            backgroundColor: sdSettings.enabled ? '#4caf50' : '#444',
-            position: 'relative', cursor: 'pointer', transition: 'background-color 0.2s',
-            flexShrink: 0, marginLeft: 12
-          }}
-        >
-          <div style={{
-            width: 18, height: 18, borderRadius: '50%',
-            backgroundColor: '#fff', position: 'absolute', top: 2,
-            left: sdSettings.enabled ? 20 : 2,
-            transition: 'left 0.2s'
-          }} />
-        </div>
-      </div>
+      <SettingCheck
+        checked={sdSettings.enabled}
+        onChange={() => void update({ enabled: !sdSettings.enabled })}
+        label="Enable Stream Deck integration"
+        help="Connect a Stream Deck MK.2 for hardware controls"
+      />
 
-      <div style={{ ...rowStyle, flexDirection: 'column', alignItems: 'flex-start' }}>
-        <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Voice transcription</div>
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          {(['cloud', 'local', 'disabled'] as const).map(opt => (
-            <label key={opt} style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: '#ccc', cursor: 'pointer' }}>
-              <input type="radio" name="sd-whisper" value={opt}
-                     checked={sdSettings.whisperBackend === opt}
-                     onChange={() => void update({ whisperBackend: opt })} />
-              {opt === 'cloud' ? 'Cloud (OpenAI Whisper)'
-                : opt === 'local' ? 'Local (Whisper.cpp)'
-                : 'Disabled'}
-            </label>
-          ))}
-        </div>
-      </div>
+      <SettingItem label="Voice transcription" stack>
+        <Segmented
+          value={sdSettings.whisperBackend}
+          options={WHISPER_OPTIONS}
+          ariaLabel="Voice transcription"
+          // A radio fired only on a change: re-picking the current backend does nothing.
+          onChange={opt => { if (opt !== sdSettings.whisperBackend) void update({ whisperBackend: opt }) }}
+        />
+      </SettingItem>
 
       {sdSettings.whisperBackend === 'local' && localProgress && (
-        <div style={{ ...rowStyle, flexDirection: 'column', alignItems: 'stretch', gap: '6px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: '13px', color: '#e0e0e0' }}>
+        <div className="cog-settings__form cog-settings__progress">
+          <div className="cog-usage__barline">
+            <span className={localProgress.stage === 'error' ? 'cog-tone-danger' : localProgress.stage === 'ready' ? 'cog-tone-success' : undefined}>
               {localProgress.stage === 'ready'
                 ? 'Local Whisper ready'
                 : localProgress.stage === 'error'
@@ -1518,80 +1301,57 @@ function StreamDeckSection(): React.ReactElement {
                     : localProgress.stage === 'configure'
                       ? 'Configuring CMake'
                       : 'Building whisper.cpp'}
-            </div>
-            <div style={{ fontSize: '11px', color: '#888' }}>{localProgress.percent}%</div>
+            </span>
+            <span className="cog-mono">{localProgress.percent}%</span>
           </div>
-          <div style={{ height: 6, backgroundColor: '#1a1a1a', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{
-              width: `${localProgress.percent}%`,
-              height: '100%',
-              backgroundColor: localProgress.stage === 'error' ? '#ef4444' : localProgress.stage === 'ready' ? '#4caf50' : '#3b82f6',
-              transition: 'width 0.3s ease',
-            }} />
+          <div className="cog-meter">
+            <div className={fillCls} style={{ width: `${localProgress.percent}%` }} />
           </div>
           {localProgress.detail && (
-            <div style={{ fontSize: '10px', color: '#666', fontFamily: 'monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div className="cog-settings__detail">
               {localProgress.detail}
             </div>
           )}
           {localProgress.stage === 'error' && (
-            <button
-              type="button"
+            <Button
+              className="cog-settings__start"
               onClick={() => {
                 setLocalProgress({ stage: 'model', percent: 0, detail: 'Retrying…' })
                 void window.electronAPI.prepareLocalWhisper?.()
               }}
-              style={{
-                padding: '4px 12px', backgroundColor: '#333', color: '#e0e0e0',
-                border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', alignSelf: 'flex-start'
-              }}
-            >Retry</button>
+            ><Icon name="refresh-cw" size={14} />Retry</Button>
           )}
         </div>
       )}
 
       {sdSettings.whisperBackend === 'cloud' && (
-        <div style={rowStyle}>
-          <div style={{ fontSize: '13px', color: '#e0e0e0', flexShrink: 0 }}>OpenAI API key</div>
-          <div style={{ display: 'flex', gap: '6px', flex: 1, minWidth: 0 }}>
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={sdSettings.openaiApiKey ?? ''}
-              onChange={e => void update({ openaiApiKey: e.target.value })}
-              placeholder="sk-…"
-              style={{
-                flex: 1, minWidth: 0, padding: '4px 8px', backgroundColor: '#1a1a1a',
-                color: '#e0e0e0', border: '1px solid #444', borderRadius: '4px', fontSize: '12px'
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => setShowKey(v => !v)}
-              style={{
-                padding: '4px 10px', backgroundColor: '#333', color: '#e0e0e0',
-                border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', flexShrink: 0
-              }}
-            >{showKey ? 'Hide' : 'Show'}</button>
-          </div>
-        </div>
+        <SettingItem label="OpenAI API key" className="cog-settings__item--wide">
+          <Input
+            type={showKey ? 'text' : 'password'}
+            mono
+            className="cog-settings__grow"
+            aria-label="OpenAI API key"
+            value={sdSettings.openaiApiKey ?? ''}
+            onChange={e => void update({ openaiApiKey: e.target.value })}
+            placeholder="sk-…"
+          />
+          <Button variant="ghost" onClick={() => setShowKey(v => !v)}>{showKey ? 'Hide' : 'Show'}</Button>
+        </SettingItem>
       )}
 
-      <div style={rowStyle}>
-        <div>
-          <div style={{ fontSize: '13px', color: '#e0e0e0' }}>Connection</div>
-          <div style={{ fontSize: '11px', color: connection === 'connected' ? '#4caf50' : connection === 'disconnected' ? '#ef4444' : '#888' }}>
+      <SettingItem
+        label="Connection"
+        help={
+          <span className={connection === 'connected' ? 'cog-settings__status cog-tone-success' : connection === 'disconnected' ? 'cog-settings__status cog-tone-danger' : 'cog-settings__status'}>
+            <Icon name={connection === 'connected' ? 'circle-check' : connection === 'disconnected' ? 'circle-x' : 'circle'} size={12} />
             {connection}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => window.electronAPI.reconnectStreamDeck?.()}
-          style={{
-            padding: '4px 12px', backgroundColor: '#333', color: '#e0e0e0',
-            border: '1px solid #444', borderRadius: '4px', cursor: 'pointer', fontSize: '12px'
-          }}
-        >Reconnect</button>
-      </div>
-    </div>
+          </span>
+        }
+      >
+        <Button onClick={() => window.electronAPI.reconnectStreamDeck?.()}>
+          <Icon name="refresh-cw" size={14} />Reconnect
+        </Button>
+      </SettingItem>
+    </>
   )
 }

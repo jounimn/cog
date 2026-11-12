@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import type { AgentConfig, AgentState, WorkspacePreset, WindowPosition, CanvasState, CommunityTeam, CommunityTeamListItem, CommunityCategory, CommunityAgent } from '../../shared/types'
 import type { WindowState } from '../hooks/useWindowManager'
 import { CLI_MODELS } from './SpawnDialog'
+import { Dialog, Field, Button, Icon, Input, Textarea, Select, Segmented, Checkbox, Row, SectionHeader, EmptyState, Loading, type IconName } from '../ui'
 
 interface PresetDialogProps {
   agents: AgentState[]
@@ -891,871 +892,532 @@ export function PresetDialog({ agents, windows, zoom, pan, onLoadPreset, onClose
   // CWD Override Prompt Modal
   if (showCwdPrompt) {
     return (
-      <div style={overlayStyle}>
-        <div style={{ ...modalStyle, width: '400px' }}>
-          <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', color: '#e0e0e0' }}>
-            {activeTab === 'community' && communityTeamToImport
-              ? `Import Team: ${communityTeamToImport.name}`
-              : activeTab === 'templates'
-                ? `Use Template: ${templateToLoad?.name}`
-                : `Load Preset: ${selectedPreset}`}
-          </h3>
-          <p style={{ color: '#aaa', fontSize: '13px', margin: '0 0 12px 0' }}>
-            Working directory for all agents:
-          </p>
-          <div style={{ display: 'flex', gap: '4px', marginBottom: '16px' }}>
-            <input
+      <Dialog
+        title={activeTab === 'community' && communityTeamToImport
+          ? `Import Team: ${communityTeamToImport.name}`
+          : activeTab === 'templates'
+            ? `Use Template: ${templateToLoad?.name}`
+            : `Load Preset: ${selectedPreset}`}
+        icon="folder-open"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowCwdPrompt(false)}>Back</Button>
+            <Button onClick={handleConfirmLoad} disabled={loading}>Load</Button>
+          </>
+        }
+      >
+        <Field label="Working directory for all agents">
+          <span className="cog-field__inline">
+            <Input
+              mono
               value={cwdOverride}
               onChange={e => setCwdOverride(e.target.value)}
               placeholder="Leave empty to use original paths"
-              style={{ ...inputStyle, flex: 1 }}
             />
-            <button
-              type="button"
-              onClick={handleBrowseCwd}
-              style={browseBtnStyle}
-            >
-              Browse
-            </button>
-          </div>
-          {error && <div style={{ color: '#ff6b6b', fontSize: '12px', marginBottom: '12px' }}>{error}</div>}
-          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-            <button onClick={() => setShowCwdPrompt(false)} style={cancelBtnStyle}>
-              Back
-            </button>
-            <button onClick={handleConfirmLoad} disabled={loading} style={loadBtnStyle}>
-              Load
-            </button>
-          </div>
-        </div>
-      </div>
+            <Button variant="ghost" onClick={handleBrowseCwd}>
+              <Icon name="folder-open" size={14} />Browse
+            </Button>
+          </span>
+        </Field>
+        {error && <Notice tone="danger">{error}</Notice>}
+      </Dialog>
     )
   }
 
+  const filteredCommunity = communityItems
+    .filter(i => communityCategory === 'all' || i.category === communityCategory)
+    .sort((a, b) => {
+      if (communitySort === 'stars') return b.stars - a.stars
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    })
+
+  const footerStart = activeTab === 'community'
+    ? (communityFetchingTeam ? 'Fetching team details...' : 'Click a team to import it')
+    : undefined
+
+  const footer = activeTab === 'save' ? (
+    <>
+      <Button variant="ghost" onClick={() => { setEditingAgents(null); if (editingAgents) setActiveTab('load'); else onClose() }}>
+        {editingAgents ? 'Back' : 'Cancel'}
+      </Button>
+      <Button
+        onClick={handleSave}
+        disabled={!presetName.trim() || loading || (editingAgents !== null && editingAgents.length === 0)}
+      >
+        Save
+      </Button>
+    </>
+  ) : activeTab === 'load' ? (
+    <>
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button onClick={handleLoadClick} disabled={!selectedPreset || loading}>Load</Button>
+    </>
+  ) : activeTab === 'templates' ? (
+    <>
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button onClick={() => { if (templateToLoad) setShowCwdPrompt(true) }} disabled={!templateToLoad}>
+        Use template
+      </Button>
+    </>
+  ) : (
+    <Button variant="ghost" onClick={onClose}>Close</Button>
+  )
+
+  const closeShareIfIdle = () => { if (!shareSubmitting) setSharePreset(null) }
+
   return (
-    <div style={overlayStyle}>
-      <div style={modalStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <h2 style={{ margin: 0, fontSize: '16px', color: '#e0e0e0' }}>Workspace Presets</h2>
-          <button onClick={onClose} style={closeBtnStyle}>×</button>
-        </div>
+    <>
+      <Dialog
+        title="Workspace presets"
+        icon="bookmark"
+        size="lg"
+        className="cog-presets"
+        bodyClassName="cog-presets__body"
+        onClose={onClose}
+        footerStart={footerStart}
+        footer={footer}
+      >
+        <Segmented<Tab>
+          value={activeTab}
+          onChange={setActiveTab}
+          ariaLabel="Preset tabs"
+          options={[
+            { value: 'save', label: 'Save' },
+            { value: 'load', label: 'Load' },
+            { value: 'templates', label: 'Templates' },
+            { value: 'community', label: 'Community' }
+          ]}
+        />
 
-        {/* Tabs */}
-        <div style={tabsContainerStyle}>
-          <button
-            onClick={() => setActiveTab('save')}
-            style={activeTab === 'save' ? activeTabStyle : tabStyle}
-          >
-            Save
-          </button>
-          <button
-            onClick={() => setActiveTab('load')}
-            style={activeTab === 'load' ? activeTabStyle : tabStyle}
-          >
-            Load
-          </button>
-          <button
-            onClick={() => setActiveTab('templates')}
-            style={activeTab === 'templates' ? activeTabStyle : tabStyle}
-          >
-            Templates
-          </button>
-          <button
-            onClick={() => setActiveTab('community')}
-            style={activeTab === 'community' ? activeTabStyle : tabStyle}
-          >
-            Community
-          </button>
-        </div>
-
-        {error && (
-          <div style={{ color: '#ff6b6b', fontSize: '12px', marginBottom: '12px', padding: '8px', backgroundColor: '#3a1a1a', borderRadius: '4px' }}>
-            {error}
-          </div>
-        )}
+        {error && <Notice tone="danger">{error}</Notice>}
 
         {activeTab === 'save' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <label style={labelStyle}>
-              Preset Name
-              <input
+          <div className="cog-dialog__group">
+            <Field label="Preset name">
+              <Input
                 value={presetName}
                 onChange={e => setPresetName(e.target.value)}
                 placeholder="e.g., My Workspace"
-                style={inputStyle}
               />
-            </label>
+            </Field>
             {editingAgents ? (
               <>
-                <div style={{ color: '#aaa', fontSize: '12px' }}>
+                <SectionHeader>
                   Editing {editingAgents.length} agent{editingAgents.length !== 1 ? 's' : ''}
-                </div>
-                <div style={{ maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                </SectionHeader>
+                <div className="cog-presets__agents cog-presets__agents--edit">
                   {editingAgents.map((agent, idx) => (
-                    <div key={idx} style={agentCardStyle}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span style={{ fontSize: '13px', color: '#e0e0e0', fontWeight: 'bold' }}>Agent {idx + 1}</span>
+                    <div key={idx} className="cog-presets__agent">
+                      <div className="cog-presets__agenthead">
+                        <span>Agent {idx + 1}</span>
                         {editingAgents.length > 1 && (
-                          <button
+                          <Button
+                            variant="icon"
                             onClick={() => removeEditingAgent(idx)}
-                            style={{ ...deleteBtnStyle, width: '20px', height: '20px', fontSize: '14px' }}
                             title="Remove agent"
+                            aria-label="Remove agent"
                           >
-                            ×
-                          </button>
+                            <Icon name="x" size={14} />
+                          </Button>
                         )}
                       </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-                        <label style={agentFieldLabelStyle}>
-                          Name
-                          <input
+                      <div className="cog-presets__grid">
+                        <Field label="Name">
+                          <Input
                             value={agent.name}
                             onChange={e => updateEditingAgent(idx, 'name', e.target.value)}
-                            style={agentFieldInputStyle}
                           />
-                        </label>
-                        <label style={agentFieldLabelStyle}>
-                          CLI
-                          <select
+                        </Field>
+                        <Field label="CLI">
+                          <Select<string>
                             value={agent.cli}
-                            onChange={e => updateEditingAgent(idx, 'cli', e.target.value)}
-                            style={agentFieldInputStyle}
-                          >
-                            <option value="claude">Claude Code</option>
-                            <option value="codex">Codex CLI</option>
-                            <option value="kimi">Kimi CLI</option>
-                            <option value="gemini">Gemini CLI</option>
-                            <option value="openclaude">OpenClaude</option>
-                            <option value="copilot">Copilot CLI</option>
-                            <option value="grok">Grok CLI</option>
-                            <option value="terminal">Plain Terminal</option>
-                          </select>
-                        </label>
-                        <label style={agentFieldLabelStyle}>
-                          Role
-                          <select
+                            onChange={v => updateEditingAgent(idx, 'cli', v)}
+                            options={EDIT_CLI_OPTIONS}
+                          />
+                        </Field>
+                        <Field label="Role">
+                          <Select<string>
                             value={agent.role}
-                            onChange={e => updateEditingAgent(idx, 'role', e.target.value)}
-                            style={agentFieldInputStyle}
-                          >
-                            <option value="orchestrator">Orchestrator</option>
-                            <option value="worker">Worker</option>
-                            <option value="researcher">Researcher</option>
-                            <option value="reviewer">Reviewer</option>
-                          </select>
-                        </label>
-                        <label style={agentFieldLabelStyle}>
-                          Model
+                            onChange={v => updateEditingAgent(idx, 'role', v)}
+                            options={EDIT_ROLE_OPTIONS}
+                          />
+                        </Field>
+                        <Field label="Model">
                           {(() => {
                             const models = CLI_MODELS[agent.cli]
                             const currentModel = agent.model || ''
                             if (!models) {
                               return (
-                                <input
+                                <Input
+                                  mono
                                   value={currentModel}
                                   onChange={e => updateEditingAgent(idx, 'model', e.target.value)}
                                   placeholder="default"
-                                  style={agentFieldInputStyle}
                                 />
                               )
                             }
                             const hasCurrent = models.some(m => m.value === currentModel)
                             return (
-                              <select
+                              <Select<string>
                                 value={currentModel}
-                                onChange={e => updateEditingAgent(idx, 'model', e.target.value)}
-                                style={agentFieldInputStyle}
-                              >
-                                {!hasCurrent && currentModel && (
-                                  <option value={currentModel}>{currentModel} (custom)</option>
-                                )}
-                                {models.map(m => (
-                                  <option key={m.value} value={m.value}>{m.label}</option>
-                                ))}
-                              </select>
+                                onChange={v => updateEditingAgent(idx, 'model', v)}
+                                options={[
+                                  ...(!hasCurrent && currentModel
+                                    ? [{ value: currentModel, label: `${currentModel} (custom)` }]
+                                    : []),
+                                  ...models.map(m => ({ value: m.value, label: m.label }))
+                                ]}
+                              />
                             )
                           })()}
-                        </label>
+                        </Field>
                       </div>
-                      <label style={{ ...agentFieldLabelStyle, marginTop: '6px' }}>
-                        Instructions
-                        <textarea
+                      <Field label="Instructions">
+                        <Textarea
                           value={agent.ceoNotes}
                           onChange={e => updateEditingAgent(idx, 'ceoNotes', e.target.value)}
                           rows={2}
-                          style={{ ...agentFieldInputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+                          className="cog-presets__notes"
                         />
-                      </label>
+                      </Field>
                     </div>
                   ))}
                 </div>
               </>
             ) : (
-              <div style={{ color: '#666', fontSize: '12px' }}>
+              <p className="cog-presets__summary">
                 Saves {agents.length} agent{agents.length !== 1 ? 's' : ''} and {windows.length} window position{windows.length !== 1 ? 's' : ''}
-              </div>
+              </p>
             )}
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
-              <button onClick={() => { setEditingAgents(null); if (editingAgents) setActiveTab('load'); else onClose() }} style={cancelBtnStyle}>
-                {editingAgents ? 'Back' : 'Cancel'}
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={!presetName.trim() || loading || (editingAgents !== null && editingAgents.length === 0)}
-                style={saveBtnStyle}
-              >
-                Save
-              </button>
-            </div>
           </div>
         )}
 
         {activeTab === 'load' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {loading ? (
-              <div style={{ color: '#666', textAlign: 'center', padding: '32px' }}>Loading presets...</div>
-            ) : presets.length === 0 ? (
-              <div style={{ color: '#666', textAlign: 'center', padding: '32px' }}>
-                No presets saved yet
-              </div>
-            ) : (
-              <div style={presetListStyle}>
-                {presets.map(preset => (
-                  <div
-                    key={preset.name}
-                    onClick={() => setSelectedPreset(preset.name)}
-                    style={selectedPreset === preset.name ? selectedPresetItemStyle : presetItemStyle}
-                  >
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '13px', color: '#e0e0e0', marginBottom: '2px' }}>{preset.name}</div>
-                      <div style={{ fontSize: '11px', color: '#666' }}>{formatDate(preset.savedAt)}</div>
-                    </div>
-                    <button
-                      onClick={e => handleUpdatePreset(preset.name, e)}
-                      style={updateBtnStyle}
-                      title="Update preset with current layout"
-                    >
-                      &#8635;
-                    </button>
-                    <button
-                      onClick={e => handleClonePreset(preset.name, e)}
-                      style={cloneBtnStyle}
-                      title="Clone preset"
-                    >
-                      &#10697;
-                    </button>
-                    <button
-                      onClick={e => handleEditPreset(preset.name, e)}
-                      style={editBtnStyle}
-                      title="Edit preset"
-                    >
-                      &#9998;
-                    </button>
-                    <button
-                      onClick={e => openShareDialog(preset.name, e)}
-                      style={shareBtnStyle}
-                      title="Share to Community"
-                    >
-                      &#9733;
-                    </button>
-                    <button
-                      onClick={e => handleDelete(preset.name, e)}
-                      style={deleteBtnStyle}
-                      title="Delete preset"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
-              <button onClick={onClose} style={cancelBtnStyle}>Cancel</button>
-              <button
-                onClick={handleLoadClick}
-                disabled={!selectedPreset || loading}
-                style={loadBtnStyle}
-              >
-                Load
-              </button>
+          loading ? (
+            <Loading>Loading presets...</Loading>
+          ) : presets.length === 0 ? (
+            <EmptyState icon="bookmark">No presets saved yet</EmptyState>
+          ) : (
+            <div className="cog-dialog__list cog-presets__list cog-presets__list--load">
+              {presets.map(preset => (
+                <Row
+                  key={preset.name}
+                  icon={<Icon name="bookmark" size={14} />}
+                  title={preset.name}
+                  meta={formatDate(preset.savedAt)}
+                  selected={selectedPreset === preset.name}
+                  onClick={() => setSelectedPreset(preset.name)}
+                  actions={
+                    <>
+                      <Button
+                        variant="icon"
+                        onClick={e => handleUpdatePreset(preset.name, e)}
+                        title="Update preset with current layout"
+                        aria-label="Update preset with current layout"
+                      >
+                        <Icon name="refresh-cw" size={14} />
+                      </Button>
+                      <Button
+                        variant="icon"
+                        onClick={e => handleClonePreset(preset.name, e)}
+                        title="Clone preset"
+                        aria-label="Clone preset"
+                      >
+                        <Icon name="copy" size={14} />
+                      </Button>
+                      <Button
+                        variant="icon"
+                        onClick={e => handleEditPreset(preset.name, e)}
+                        title="Edit preset"
+                        aria-label="Edit preset"
+                      >
+                        <Icon name="pencil" size={14} />
+                      </Button>
+                      <Button
+                        variant="icon"
+                        onClick={e => openShareDialog(preset.name, e)}
+                        title="Share to Community"
+                        aria-label="Share to Community"
+                      >
+                        <Icon name="star" size={14} />
+                      </Button>
+                      <Button
+                        variant="icon"
+                        className="cog-tone-danger"
+                        onClick={e => handleDelete(preset.name, e)}
+                        title="Delete preset"
+                        aria-label="Delete preset"
+                      >
+                        <Icon name="trash" size={14} />
+                      </Button>
+                    </>
+                  }
+                />
+              ))}
             </div>
-          </div>
+          )
         )}
 
         {activeTab === 'templates' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            <input
+          <div className="cog-dialog__group">
+            <Input
               value={templateSearch}
               onChange={e => setTemplateSearch(e.target.value)}
               placeholder="Search templates..."
-              style={inputStyle}
+              aria-label="Search templates"
             />
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            <div className="cog-presets__filters" role="group" aria-label="Filter by CLI">
               {ALL_CLIS.map(cli => (
-                <button
-                  key={cli}
-                  onClick={() => toggleCliFilter(cli)}
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: '11px',
-                    borderRadius: '12px',
-                    border: cliFilters.has(cli) ? '1px solid #4a9eff' : '1px solid #444',
-                    backgroundColor: cliFilters.has(cli) ? '#1e3a5f' : '#2a2a2a',
-                    color: cliFilters.has(cli) ? '#8cc4ff' : '#888',
-                    cursor: 'pointer',
-                  }}
-                >
+                <Checkbox key={cli} checked={cliFilters.has(cli)} onChange={() => toggleCliFilter(cli)}>
                   {CLI_LABELS[cli]}
-                </button>
+                </Checkbox>
               ))}
               {cliFilters.size > 0 && (
-                <button
-                  onClick={() => setCliFilters(new Set())}
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: '11px',
-                    borderRadius: '12px',
-                    border: '1px solid #444',
-                    backgroundColor: 'transparent',
-                    color: '#666',
-                    cursor: 'pointer',
-                  }}
-                >
+                <Button variant="ghost" className="cog-presets__clear" onClick={() => setCliFilters(new Set())}>
                   Clear
-                </button>
+                </Button>
               )}
             </div>
-            <div style={{ maxHeight: '320px', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {filteredTemplates.length === 0 ? (
-                <div style={{ color: '#555', textAlign: 'center', padding: '20px 0' }}>
-                  No templates match your filters.
-                </div>
-              ) : (
-                filteredTemplates.map(template => (
-                  <div
+            {filteredTemplates.length === 0 ? (
+              <EmptyState icon="search" compact>No templates match your filters.</EmptyState>
+            ) : (
+              <div className="cog-dialog__list cog-presets__list cog-presets__list--templates">
+                {filteredTemplates.map(template => (
+                  <Row
                     key={template.name}
+                    className="cog-presets__row"
+                    icon={<Icon name="users" size={14} />}
+                    title={template.name}
+                    meta={
+                      <>
+                        <span>{template.description}</span>
+                        <span className="cog-presets__detail">
+                          {template.agents.length} agent{template.agents.length !== 1 ? 's' : ''}
+                          {' · '}
+                          Requires: {template.requiredClis.map(c => CLI_LABELS[c] || c).join(', ')}
+                        </span>
+                      </>
+                    }
+                    selected={selectedPreset === template.name && activeTab === 'templates'}
                     onClick={() => {
                       setSelectedPreset(template.name)
                       setTemplateToLoad(template)
                     }}
-                    style={selectedPreset === template.name && activeTab === 'templates' ? selectedPresetItemStyle : presetItemStyle}
-                  >
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '13px', color: '#e0e0e0', marginBottom: '2px' }}>{template.name}</div>
-                      <div style={{ fontSize: '11px', color: '#666' }}>{template.description}</div>
-                      <div style={{ fontSize: '10px', color: '#555', marginTop: '3px' }}>
-                        {template.agents.length} agent{template.agents.length !== 1 ? 's' : ''}
-                        {' \u00B7 '}
-                        Requires: {template.requiredClis.map(c => CLI_LABELS[c] || c).join(', ')}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '4px' }}>
-              <button onClick={onClose} style={cancelBtnStyle}>Cancel</button>
-              <button
-                onClick={() => { if (templateToLoad) setShowCwdPrompt(true) }}
-                disabled={!templateToLoad}
-                style={loadBtnStyle}
-              >
-                Use Template
-              </button>
-            </div>
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'community' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="cog-dialog__group">
             {/* Controls row — sort + refresh */}
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              <select
-                value={communitySort}
-                onChange={e => setCommunitySort(e.target.value as 'stars' | 'newest')}
-                style={{ ...inputStyle, flex: 'none', width: 'auto', padding: '4px 8px', fontSize: '11px' }}
-              >
-                <option value="stars">Most Starred</option>
-                <option value="newest">Newest</option>
-              </select>
-              <button
+            <div className="cog-presets__bar">
+              <span className="cog-presets__sort">
+                <Select<'stars' | 'newest'>
+                  value={communitySort}
+                  onChange={setCommunitySort}
+                  ariaLabel="Sort community teams"
+                  options={[
+                    { value: 'stars', label: 'Most starred' },
+                    { value: 'newest', label: 'Newest' }
+                  ]}
+                />
+              </span>
+              <Button
+                variant="ghost"
                 onClick={() => loadCommunityList(true)}
                 disabled={communityLoading}
-                style={{ ...cancelBtnStyle, padding: '4px 10px', fontSize: '11px' }}
                 title="Refresh from GitHub"
               >
-                {communityLoading ? '...' : '↻ Refresh'}
-              </button>
-              <div style={{ flex: 1 }} />
-              <span style={{ color: '#666', fontSize: '10px' }}>
+                {communityLoading ? '...' : <><Icon name="refresh-cw" size={14} />Refresh</>}
+              </Button>
+              <span className="cog-presets__count">
                 {communityItems.length} team{communityItems.length !== 1 ? 's' : ''}
               </span>
             </div>
 
-            {/* Category filter chips */}
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-              {COMMUNITY_CATEGORIES.map(c => (
-                <button
-                  key={c.value}
-                  onClick={() => setCommunityCategory(c.value)}
-                  style={{
-                    padding: '3px 10px',
-                    fontSize: '11px',
-                    borderRadius: '12px',
-                    border: communityCategory === c.value ? '1px solid #4a9eff' : '1px solid #444',
-                    backgroundColor: communityCategory === c.value ? '#1e3a5f' : '#2a2a2a',
-                    color: communityCategory === c.value ? '#8cc4ff' : '#888',
-                    cursor: 'pointer',
-                    fontFamily: 'inherit'
-                  }}
-                >
-                  {c.label}
-                </button>
-              ))}
+            {/* Category filter */}
+            <div className="cog-presets__cats">
+              <Segmented<CommunityCategoryOrAll>
+                value={communityCategory}
+                onChange={setCommunityCategory}
+                ariaLabel="Filter by category"
+                options={COMMUNITY_CATEGORIES.map(c => ({ value: c.value, label: c.label }))}
+              />
             </div>
 
-            {communityError && (
-              <div style={{ color: '#ff6b6b', fontSize: '11px', padding: '6px 8px', backgroundColor: '#3a1a1a', borderRadius: '4px' }}>
-                {communityError}
-              </div>
-            )}
+            {communityError && <Notice tone="danger">{communityError}</Notice>}
 
             {/* Team list */}
-            <div style={{ maxHeight: '340px', overflow: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {communityLoading && communityItems.length === 0 ? (
-                <div style={{ color: '#666', textAlign: 'center', padding: '20px 0', fontSize: '12px' }}>
-                  Loading community teams...
-                </div>
-              ) : (() => {
-                const filtered = communityItems
-                  .filter(i => communityCategory === 'all' || i.category === communityCategory)
-                  .sort((a, b) => {
-                    if (communitySort === 'stars') return b.stars - a.stars
-                    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-                  })
-                if (filtered.length === 0) {
-                  return (
-                    <div style={{ color: '#555', textAlign: 'center', padding: '20px 0', fontSize: '12px' }}>
-                      {communityItems.length === 0
-                        ? 'No teams shared yet. Be the first — share a preset from the Load tab!'
-                        : 'No teams match the selected category.'}
-                    </div>
-                  )
-                }
-                return filtered.map(item => (
-                  <div
+            {communityLoading && communityItems.length === 0 ? (
+              <Loading>Loading community teams...</Loading>
+            ) : filteredCommunity.length === 0 ? (
+              <EmptyState icon="users" compact>
+                {communityItems.length === 0
+                  ? 'No teams shared yet. Be the first — share a preset from the Load tab!'
+                  : 'No teams match the selected category.'}
+              </EmptyState>
+            ) : (
+              <div className="cog-dialog__list cog-presets__list cog-presets__list--community">
+                {filteredCommunity.map(item => (
+                  <Row
                     key={item.issueNumber}
+                    className="cog-presets__row"
+                    icon={<Icon name="users" size={14} />}
+                    title={item.name}
+                    state={<span className="cog-presets__cat">{item.category}</span>}
+                    meta={
+                      <>
+                        <span>{item.description.length > 140 ? item.description.slice(0, 140) + '...' : item.description}</span>
+                        <span className="cog-presets__detail">
+                          {item.agentCount} agent{item.agentCount !== 1 ? 's' : ''}
+                          {' · '}
+                          <span className="cog-mono">{item.clis.join(' + ')}</span>
+                          {' · by '}
+                          <span className="cog-presets__author">{item.author}</span>
+                        </span>
+                      </>
+                    }
                     onClick={() => handleCommunityCardClick(item)}
-                    style={communityCardStyle}
-                    onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = '#555' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = '#333' }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                      <button
+                    actions={
+                      <Button
+                        variant="ghost"
+                        className={item.isStarredByMe ? 'cog-presets__star cog-presets__star--on' : 'cog-presets__star'}
                         onClick={e => handleToggleStar(item.issueNumber, e)}
                         title={item.isStarredByMe ? 'Unstar' : 'Star'}
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer',
-                          color: item.isStarredByMe ? '#fbbf24' : '#555',
-                          fontSize: '14px', padding: 0, fontFamily: 'inherit',
-                          display: 'flex', alignItems: 'center', gap: '3px'
-                        }}
+                        aria-pressed={item.isStarredByMe}
                       >
-                        {item.isStarredByMe ? '★' : '☆'}
-                        <span style={{ fontSize: '11px', color: item.isStarredByMe ? '#fbbf24' : '#888' }}>
-                          {item.stars}
-                        </span>
-                      </button>
-                      <span style={{ fontSize: '13px', color: '#e0e0e0', fontWeight: 600, flex: 1 }}>
-                        {item.name}
-                      </span>
-                      <span style={{
-                        fontSize: '9px', color: '#8cc4ff', textTransform: 'uppercase',
-                        border: '1px solid #2a4a6a', borderRadius: '3px', padding: '1px 5px'
-                      }}>
-                        {item.category}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#999', lineHeight: '1.4', marginBottom: '4px' }}>
-                      {item.description.length > 140 ? item.description.slice(0, 140) + '...' : item.description}
-                    </div>
-                    <div style={{ fontSize: '10px', color: '#555' }}>
-                      {item.agentCount} agent{item.agentCount !== 1 ? 's' : ''}
-                      {' · '}
-                      {item.clis.join(' + ')}
-                      {' · by '}
-                      <span style={{ color: '#888' }}>{item.author}</span>
-                    </div>
-                  </div>
-                ))
-              })()}
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-              <span style={{ fontSize: '10px', color: '#555' }}>
-                {communityFetchingTeam ? 'Fetching team details...' : 'Click a team to import it'}
-              </span>
-              <button onClick={onClose} style={cancelBtnStyle}>Close</button>
-            </div>
+                        <Icon name="star" size={14} />
+                        <span>{item.stars}</span>
+                      </Button>
+                    }
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </Dialog>
 
       {/* Share Dialog — overlayed when sharePreset is set */}
       {sharePreset && (
-        <div style={{ ...overlayStyle, zIndex: 10001 }} onClick={() => !shareSubmitting && setSharePreset(null)}>
-          <div style={{ ...modalStyle, width: '520px', maxHeight: '90vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <h2 style={{ margin: 0, fontSize: '15px', color: '#e0e0e0' }}>Share to Community</h2>
-              <button onClick={() => setSharePreset(null)} disabled={shareSubmitting} style={closeBtnStyle}>×</button>
-            </div>
-
-            <div style={{
-              backgroundColor: '#3a2a1a', border: '1px solid #8a5a2a', borderRadius: '4px',
-              padding: '8px 10px', marginBottom: '12px', fontSize: '11px', color: '#f0a040'
-            }}>
-              ⚠ Your CEO Notes will be visible to everyone. Review and edit below to remove any project-specific details.
-            </div>
-
-            {shareError && (
-              <div style={{ color: '#ff6b6b', fontSize: '11px', marginBottom: '8px', padding: '6px 8px', backgroundColor: '#3a1a1a', borderRadius: '4px' }}>
-                {shareError}
-              </div>
-            )}
-            {shareSuccess && (
-              <div style={{ color: '#6ee7b7', fontSize: '11px', marginBottom: '8px', padding: '6px 8px', backgroundColor: '#1a2e1a', borderRadius: '4px' }}>
-                {shareSuccess}
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-              <label style={labelStyle}>
-                Team Name
-                <input value={shareName} onChange={e => setShareName(e.target.value)} style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                Category
-                <select
-                  value={shareCategory}
-                  onChange={e => setShareCategory(e.target.value as CommunityCategory)}
-                  style={inputStyle}
-                >
-                  {COMMUNITY_CATEGORIES.filter(c => c.value !== 'all').map(c => (
-                    <option key={c.value} value={c.value}>{c.label}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <label style={{ ...labelStyle, marginBottom: '8px' }}>
-              Author (displayed to everyone)
-              <input
-                value={shareAuthor}
-                onChange={e => setShareAuthor(e.target.value)}
-                placeholder="Your name or handle"
-                style={inputStyle}
-              />
-            </label>
-            <label style={{ ...labelStyle, marginBottom: '8px' }}>
-              Description
-              <textarea
-                value={shareDescription}
-                onChange={e => setShareDescription(e.target.value)}
-                placeholder="What is this team good for? What's the workflow?"
-                rows={3}
-                style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
-              />
-            </label>
-
-            <div style={{ color: '#888', fontSize: '10px', textTransform: 'uppercase', margin: '12px 0 6px 0' }}>
-              Agents ({shareAgents.length}) — edit CEO Notes to sanitize
-            </div>
-            <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {shareAgents.map((a, idx) => (
-                <div key={idx} style={{ ...agentCardStyle, padding: '8px' }}>
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '12px', color: '#e0e0e0', fontWeight: 600 }}>{a.name}</span>
-                    <span style={{ fontSize: '10px', color: '#888' }}>
-                      {a.cli}{a.model ? ` · ${a.model}` : ''} · {a.role}
-                    </span>
-                  </div>
-                  <textarea
-                    value={a.ceoNotes}
-                    onChange={e => updateShareAgent(idx, 'ceoNotes', e.target.value)}
-                    rows={3}
-                    style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit', fontSize: '11px' }}
-                  />
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '12px' }}>
-              <button onClick={() => setSharePreset(null)} disabled={shareSubmitting} style={cancelBtnStyle}>
+        <Dialog
+          title="Share to community"
+          icon="star"
+          size="md"
+          className="cog-presets"
+          zIndex={100002}
+          onClose={closeShareIfIdle}
+          closeOnBackdrop
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setSharePreset(null)} disabled={shareSubmitting}>
                 Cancel
-              </button>
-              <button onClick={handleShareSubmit} disabled={shareSubmitting} style={saveBtnStyle}>
+              </Button>
+              <Button onClick={handleShareSubmit} disabled={shareSubmitting}>
                 {shareSubmitting ? 'Sharing...' : 'Share'}
-              </button>
-            </div>
+              </Button>
+            </>
+          }
+        >
+          <Notice tone="warning" icon="triangle-alert">
+            Your CEO Notes will be visible to everyone. Review and edit below to remove any project-specific details.
+          </Notice>
+
+          {shareError && <Notice tone="danger">{shareError}</Notice>}
+          {shareSuccess && <Notice tone="success" icon="circle-check">{shareSuccess}</Notice>}
+
+          <div className="cog-presets__grid">
+            <Field label="Team name">
+              <Input value={shareName} onChange={e => setShareName(e.target.value)} />
+            </Field>
+            <Field label="Category">
+              <Select<CommunityCategory>
+                value={shareCategory}
+                onChange={setShareCategory}
+                options={COMMUNITY_CATEGORIES.filter(c => c.value !== 'all').map(c => ({
+                  value: c.value as CommunityCategory,
+                  label: c.label
+                }))}
+              />
+            </Field>
           </div>
-        </div>
+          <Field label="Author (displayed to everyone)">
+            <Input
+              value={shareAuthor}
+              onChange={e => setShareAuthor(e.target.value)}
+              placeholder="Your name or handle"
+            />
+          </Field>
+          <Field label="Description">
+            <Textarea
+              value={shareDescription}
+              onChange={e => setShareDescription(e.target.value)}
+              placeholder="What is this team good for? What's the workflow?"
+              rows={3}
+              className="cog-presets__notes"
+            />
+          </Field>
+
+          <SectionHeader count={shareAgents.length}>
+            Agents <span className="cog-presets__sectionhint">edit CEO Notes to sanitize</span>
+          </SectionHeader>
+          <div className="cog-presets__agents cog-presets__agents--share">
+            {shareAgents.map((a, idx) => (
+              <div key={idx} className="cog-presets__agent">
+                <div className="cog-presets__agenthead">
+                  <span>{a.name}</span>
+                  <span className="cog-presets__agentmeta">
+                    {a.cli}{a.model ? ` · ${a.model}` : ''} · {a.role}
+                  </span>
+                </div>
+                <Textarea
+                  value={a.ceoNotes}
+                  onChange={e => updateShareAgent(idx, 'ceoNotes', e.target.value)}
+                  rows={3}
+                  aria-label={`CEO Notes for ${a.name}`}
+                  className="cog-presets__notes"
+                />
+              </div>
+            ))}
+          </div>
+        </Dialog>
       )}
-    </div>
+    </>
   )
 }
 
-// Styles
-const overlayStyle: React.CSSProperties = {
-  position: 'fixed',
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundColor: 'rgba(0,0,0,0.7)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  zIndex: 10000
-}
+const EDIT_CLI_OPTIONS: { value: string; label: string }[] = [
+  { value: 'claude', label: 'Claude Code' },
+  { value: 'codex', label: 'Codex CLI' },
+  { value: 'kimi', label: 'Kimi CLI' },
+  { value: 'gemini', label: 'Gemini CLI' },
+  { value: 'openclaude', label: 'OpenClaude' },
+  { value: 'copilot', label: 'Copilot CLI' },
+  { value: 'grok', label: 'Grok CLI' },
+  { value: 'terminal', label: 'Plain Terminal' }
+]
 
-const modalStyle: React.CSSProperties = {
-  backgroundColor: '#1e1e1e',
-  border: '1px solid #333',
-  borderRadius: '8px',
-  padding: '24px',
-  width: '450px',
-  display: 'flex',
-  flexDirection: 'column'
-}
+const EDIT_ROLE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'orchestrator', label: 'Orchestrator' },
+  { value: 'worker', label: 'Worker' },
+  { value: 'researcher', label: 'Researcher' },
+  { value: 'reviewer', label: 'Reviewer' }
+]
 
-const closeBtnStyle: React.CSSProperties = {
-  background: 'none',
-  border: 'none',
-  color: '#666',
-  fontSize: '24px',
-  cursor: 'pointer',
-  lineHeight: 1,
-  padding: '0 4px'
-}
-
-const tabsContainerStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: '4px',
-  marginBottom: '16px',
-  borderBottom: '1px solid #333',
-  paddingBottom: '8px'
-}
-
-const tabStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '8px 16px',
-  backgroundColor: '#2a2a2a',
-  border: '1px solid #444',
-  borderRadius: '4px',
-  color: '#aaa',
-  cursor: 'pointer',
-  fontSize: '13px'
-}
-
-const activeTabStyle: React.CSSProperties = {
-  flex: 1,
-  padding: '8px 16px',
-  backgroundColor: '#3a3a3a',
-  border: '1px solid #555',
-  borderRadius: '4px',
-  color: '#e0e0e0',
-  cursor: 'pointer',
-  fontSize: '13px',
-  fontWeight: 'bold'
-}
-
-const labelStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '4px',
-  fontSize: '12px',
-  color: '#aaa'
-}
-
-const inputStyle: React.CSSProperties = {
-  backgroundColor: '#2a2a2a',
-  border: '1px solid #444',
-  borderRadius: '4px',
-  padding: '8px',
-  color: '#e0e0e0',
-  fontSize: '13px',
-  fontFamily: 'inherit'
-}
-
-const presetListStyle: React.CSSProperties = {
-  maxHeight: '240px',
-  overflowY: 'auto',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '4px'
-}
-
-const presetItemStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  padding: '10px 12px',
-  backgroundColor: '#2a2a2a',
-  border: '1px solid #333',
-  borderRadius: '4px',
-  cursor: 'pointer'
-}
-
-const selectedPresetItemStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  padding: '10px 12px',
-  backgroundColor: '#2d4a3e',
-  border: '1px solid #4caf50',
-  borderRadius: '4px',
-  cursor: 'pointer'
-}
-
-const updateBtnStyle: React.CSSProperties = {
-  width: '24px',
-  height: '24px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: 'transparent',
-  border: 'none',
-  color: '#666',
-  fontSize: '16px',
-  cursor: 'pointer',
-  borderRadius: '4px'
-}
-
-const cloneBtnStyle: React.CSSProperties = {
-  width: '24px',
-  height: '24px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: 'transparent',
-  border: 'none',
-  color: '#666',
-  fontSize: '14px',
-  cursor: 'pointer',
-  borderRadius: '4px'
-}
-
-const editBtnStyle: React.CSSProperties = {
-  width: '24px',
-  height: '24px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: 'transparent',
-  border: 'none',
-  color: '#666',
-  fontSize: '14px',
-  cursor: 'pointer',
-  borderRadius: '4px'
-}
-
-const shareBtnStyle: React.CSSProperties = {
-  width: '24px',
-  height: '24px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: 'transparent',
-  border: 'none',
-  color: '#666',
-  fontSize: '14px',
-  cursor: 'pointer',
-  borderRadius: '4px'
-}
-
-const communityCardStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  padding: '10px 12px',
-  backgroundColor: '#232323',
-  border: '1px solid #333',
-  borderRadius: '4px',
-  cursor: 'pointer',
-  transition: 'border-color 0.1s'
-}
-
-const deleteBtnStyle: React.CSSProperties = {
-  width: '24px',
-  height: '24px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  backgroundColor: 'transparent',
-  border: 'none',
-  color: '#666',
-  fontSize: '18px',
-  cursor: 'pointer',
-  borderRadius: '4px'
-}
-
-const cancelBtnStyle: React.CSSProperties = {
-  padding: '8px 16px',
-  backgroundColor: '#2a2a2a',
-  border: '1px solid #444',
-  borderRadius: '4px',
-  color: '#aaa',
-  cursor: 'pointer',
-  fontSize: '13px'
-}
-
-const saveBtnStyle: React.CSSProperties = {
-  padding: '8px 16px',
-  backgroundColor: '#2d5a2d',
-  border: '1px solid #4caf50',
-  borderRadius: '4px',
-  color: '#4caf50',
-  cursor: 'pointer',
-  fontSize: '13px'
-}
-
-const loadBtnStyle: React.CSSProperties = {
-  padding: '8px 16px',
-  backgroundColor: '#2a4a5a',
-  border: '1px solid #4a9eff',
-  borderRadius: '4px',
-  color: '#4a9eff',
-  cursor: 'pointer',
-  fontSize: '13px'
-}
-
-const browseBtnStyle: React.CSSProperties = {
-  padding: '8px 12px',
-  backgroundColor: '#2a2a2a',
-  border: '1px solid #444',
-  borderRadius: '4px',
-  color: '#aaa',
-  cursor: 'pointer',
-  fontSize: '12px',
-  whiteSpace: 'nowrap'
-}
-
-const agentCardStyle: React.CSSProperties = {
-  padding: '10px',
-  backgroundColor: '#252525',
-  border: '1px solid #3a3a3a',
-  borderRadius: '6px'
-}
-
-const agentFieldLabelStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '2px',
-  fontSize: '11px',
-  color: '#888'
-}
-
-const agentFieldInputStyle: React.CSSProperties = {
-  backgroundColor: '#1e1e1e',
-  border: '1px solid #3a3a3a',
-  borderRadius: '3px',
-  padding: '4px 6px',
-  color: '#e0e0e0',
-  fontSize: '12px'
+/** An inline message inside the dialog body: error, warning or success, with its icon. */
+function Notice({ tone, icon = 'circle-alert', children }: {
+  tone: 'danger' | 'warning' | 'success'
+  icon?: IconName
+  children: React.ReactNode
+}): React.ReactElement {
+  return (
+    <div className={`cog-presets__notice cog-presets__notice--${tone}`} role={tone === 'danger' ? 'alert' : 'status'}>
+      <Icon name={icon} size={14} />
+      <span>{children}</span>
+    </div>
+  )
 }

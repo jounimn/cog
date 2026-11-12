@@ -2340,6 +2340,11 @@ function flushPendingNudges(agentName: string): void {
 // When a message is queued for an agent, nudge them to call get_messages().
 function setupMessageNudge(hub: HubServer, workspaceId: string): void {
   hub.messages.onMessageQueued = (msg) => {
+    // Let the canvas animate a message travelling along its link
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC.HUB_MESSAGE_DELIVERED, { from: msg.from, to: msg.to, tabId: msg.tabId })
+    }
+
     // When an agent messages the user, show an OS notification
     if (msg.to === 'user') {
       const settings = loadSettings()

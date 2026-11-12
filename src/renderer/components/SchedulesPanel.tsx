@@ -3,6 +3,7 @@ import type { ScheduledPrompt, CreateScheduleInput, EditScheduleInput, AgentStat
 import { ScheduleDialog, type AgentOption } from './ScheduleDialog'
 import { ScheduleRow } from './ScheduleRow'
 import { PastScheduleRow } from './PastScheduleRow'
+import { Button, Icon, EmptyState, Toolbar } from '../ui'
 
 interface Props {
   agents: AgentState[]
@@ -74,74 +75,69 @@ export function SchedulesPanel({ agents, tabs }: Props): React.ReactElement {
   }
 
   return (
-    <div style={{
-      background: '#1a1a1a', color: '#e0e0e0', padding: 12, height: '100%',
-      overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0, fontSize: 14 }}>Schedules</h3>
-        <button
-          onClick={() => { setDialogMode('create'); setEditTarget(null); setDialogOpen(true) }}
-          disabled={agents.length === 0}
-          style={{
-            background: '#3b82f6', color: '#fff', border: 'none',
-            padding: '4px 10px', borderRadius: 4, cursor: agents.length === 0 ? 'not-allowed' : 'pointer',
-            fontSize: 12, opacity: agents.length === 0 ? 0.4 : 1
-          }}
-        >
-          + New
-        </button>
-      </div>
-
-      {active.length === 0 && past.length === 0 && (
-        <div style={{ color: '#666', fontSize: 12, fontStyle: 'italic' }}>
-          No schedules yet. Click <strong>+ New</strong> to create one.
-        </div>
-      )}
-
-      {active.map(s => (
-        <ScheduleRow
-          key={s.id}
-          schedule={s}
-          agentName={agentNameById(s.agentId)}
-          tabName={tabNameById(s.tabId)}
-          now={now}
-          onPause={async () => { await window.electronAPI.pauseSchedule(s.id); await refresh() }}
-          onResume={async () => { await window.electronAPI.resumeSchedule(s.id); await refresh() }}
-          onStop={async () => { await window.electronAPI.stopSchedule(s.id); await refresh() }}
-        />
-      ))}
-
-      {past.length > 0 && (
-        <>
-          <button
-            onClick={() => setShowPast(v => !v)}
-            style={{
-              background: 'transparent', color: '#888', border: 'none',
-              padding: '4px 0', cursor: 'pointer', fontSize: 11, textAlign: 'left',
-              borderTop: '1px solid #2a2a2a', marginTop: 6
-            }}
+    <div className="cog-panel cog-sched-panel">
+      <Toolbar
+        label="Schedules"
+        actions={
+          <Button
+            onClick={() => { setDialogMode('create'); setEditTarget(null); setDialogOpen(true) }}
+            disabled={agents.length === 0}
           >
-            ─── Past schedules ({past.length}) {showPast ? '▲' : '▼'} ───
-          </button>
-          {showPast && past.map(s => (
-            <PastScheduleRow
-              key={s.id}
-              schedule={s}
-              agentName={agentNameById(s.agentId)}
-              tabName={tabNameById(s.tabId)}
-              onRestart={async () => { await window.electronAPI.restartSchedule(s.id); await refresh() }}
-              onEdit={() => { setDialogMode('edit'); setEditTarget(s); setDialogOpen(true) }}
-              onDelete={async () => {
-                if (confirm(`Delete "${s.name}"?`)) {
-                  await window.electronAPI.deleteSchedule(s.id)
-                  await refresh()
-                }
-              }}
-            />
-          ))}
-        </>
-      )}
+            <Icon name="plus" size={14} />New
+          </Button>
+        }
+      />
+
+      <div className="cog-panel__body">
+        {active.length === 0 && past.length === 0 && (
+          <EmptyState icon="calendar-clock">
+            Prompts you schedule for an agent will appear here. Click New to create one.
+          </EmptyState>
+        )}
+
+        {active.map(s => (
+          <ScheduleRow
+            key={s.id}
+            schedule={s}
+            agentName={agentNameById(s.agentId)}
+            tabName={tabNameById(s.tabId)}
+            now={now}
+            onPause={async () => { await window.electronAPI.pauseSchedule(s.id); await refresh() }}
+            onResume={async () => { await window.electronAPI.resumeSchedule(s.id); await refresh() }}
+            onStop={async () => { await window.electronAPI.stopSchedule(s.id); await refresh() }}
+          />
+        ))}
+
+        {past.length > 0 && (
+          <>
+            <button
+              type="button"
+              className="cog-disclosure"
+              onClick={() => setShowPast(v => !v)}
+              aria-expanded={showPast}
+            >
+              <Icon name={showPast ? 'chevron-down' : 'chevron-right'} size={14} />
+              Past schedules <span className="cog-disclosure__count">{past.length}</span>
+            </button>
+            {showPast && past.map(s => (
+              <PastScheduleRow
+                key={s.id}
+                schedule={s}
+                agentName={agentNameById(s.agentId)}
+                tabName={tabNameById(s.tabId)}
+                onRestart={async () => { await window.electronAPI.restartSchedule(s.id); await refresh() }}
+                onEdit={() => { setDialogMode('edit'); setEditTarget(s); setDialogOpen(true) }}
+                onDelete={async () => {
+                  if (confirm(`Delete "${s.name}"?`)) {
+                    await window.electronAPI.deleteSchedule(s.id)
+                    await refresh()
+                  }
+                }}
+              />
+            ))}
+          </>
+        )}
+      </div>
 
       <ScheduleDialog
         open={dialogOpen}

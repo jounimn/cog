@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react'
+import { Dialog, EmptyState, Input, Segmented } from '../ui'
 
 // MCP Tools Reference — keep this in sync with src/mcp-server/index.ts.
 // Roles indicate TYPICAL usage; in practice every agent has access to every
@@ -78,7 +79,7 @@ const CATEGORIES: ToolCategory[] = [
   },
   {
     id: 'tasks',
-    label: 'Pinboard / Tasks',
+    label: 'Pinboard / tasks',
     description: 'Shared task board. Orchestrators post, workers claim and complete.',
     tools: [
       {
@@ -148,7 +149,7 @@ const CATEGORIES: ToolCategory[] = [
   },
   {
     id: 'knowledge',
-    label: 'Shared Knowledge',
+    label: 'Shared knowledge',
     description: 'Info channel for research findings, status notes, and shared context.',
     tools: [
       {
@@ -193,7 +194,7 @@ const CATEGORIES: ToolCategory[] = [
   },
   {
     id: 'agents',
-    label: 'Agents & Discovery',
+    label: 'Agents & discovery',
     description: 'Inspect the team — who else is in the workspace and what they are doing.',
     tools: [
       {
@@ -240,7 +241,7 @@ const CATEGORIES: ToolCategory[] = [
   },
   {
     id: 'files',
-    label: 'Project Files',
+    label: 'Project files',
     description: 'Read and write files within the current project directory. Sandboxed — paths cannot escape the project root.',
     tools: [
       {
@@ -274,14 +275,6 @@ const CATEGORIES: ToolCategory[] = [
     ],
   },
 ]
-
-const ROLE_COLORS: Record<ToolRole, string> = {
-  orchestrator: '#d0a85c',
-  worker: '#4caf50',
-  researcher: '#8cc4ff',
-  reviewer: '#c586c0',
-  all: '#888',
-}
 
 const ROLE_LABELS: Record<ToolRole, string> = {
   orchestrator: 'Orchestrator',
@@ -322,205 +315,81 @@ export function HelpDialog({ onClose }: HelpDialogProps): React.ReactElement {
   const totalTools = CATEGORIES.reduce((sum, c) => sum + c.tools.length, 0)
   const visibleTools = filteredCategories.reduce((sum, c) => sum + c.tools.length, 0)
 
+  const roleOptions = [
+    { value: 'any' as const, label: 'Any' },
+    ...ALL_ROLES.filter(r => r !== 'all').map(r => ({ value: r, label: ROLE_LABELS[r] }))
+  ]
+
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 100002,
-      }}
+    <Dialog
+      title="MCP tools reference"
+      icon="book-open"
+      size="lg"
+      zIndex={100002}
+      onClose={onClose}
+      closeOnBackdrop
+      headerExtra={<>{visibleTools} of {totalTools} tools</>}
+      footerStart={<span>All tools are accessible to every agent. Role badges indicate <em>typical</em> usage.</span>}
+      footer={<span className="cog-help__source">Source: src/mcp-server/index.ts</span>}
+      className="cog-help"
     >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          backgroundColor: '#1e1e1e',
-          border: '1px solid #333',
-          borderRadius: '8px',
-          width: '760px',
-          maxWidth: '92vw',
-          maxHeight: '85vh',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        {/* Header */}
-        <div style={{
-          padding: '16px 20px',
-          borderBottom: '1px solid #333',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-        }}>
-          <h2 style={{ margin: 0, fontSize: '16px', color: '#e0e0e0', flex: 1 }}>
-            MCP Tools Reference
-            <span style={{ marginLeft: '10px', color: '#666', fontSize: '11px', fontWeight: 'normal' }}>
-              {visibleTools} of {totalTools} tools
-            </span>
-          </h2>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'none', border: 'none', color: '#888',
-              fontSize: '20px', cursor: 'pointer', padding: '0 4px',
-            }}
-            aria-label="Close"
-          >{'\u00D7'}</button>
-        </div>
-
-        {/* Filter bar */}
-        <div style={{
-          padding: '12px 20px',
-          borderBottom: '1px solid #2a2a2a',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          flexWrap: 'wrap',
-        }}>
-          <input
-            type="text"
-            placeholder="Search tools by name, description, or arg..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            style={{
-              flex: 1, minWidth: '200px',
-              backgroundColor: '#2a2a2a', border: '1px solid #444',
-              borderRadius: '4px', padding: '6px 10px',
-              color: '#e0e0e0', fontSize: '12px',
-            }}
-          />
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-            <span style={{ color: '#666', fontSize: '11px', marginRight: '4px' }}>Role:</span>
-            <button
-              onClick={() => setRoleFilter('any')}
-              style={chipStyle(roleFilter === 'any', '#888')}
-            >Any</button>
-            {ALL_ROLES.filter(r => r !== 'all').map(r => (
-              <button
-                key={r}
-                onClick={() => setRoleFilter(r)}
-                style={chipStyle(roleFilter === r, ROLE_COLORS[r])}
-              >{ROLE_LABELS[r]}</button>
-            ))}
-          </div>
-        </div>
-
-        {/* Tool list */}
-        <div style={{ overflow: 'auto', padding: '16px 20px', flex: 1 }}>
-          {filteredCategories.length === 0 && (
-            <div style={{ color: '#666', fontSize: '13px', textAlign: 'center', padding: '40px 0' }}>
-              No tools match the current filter.
-            </div>
-          )}
-          {filteredCategories.map(cat => (
-            <div key={cat.id} style={{ marginBottom: '24px' }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'baseline',
-                gap: '10px',
-                marginBottom: '4px',
-              }}>
-                <h3 style={{ margin: 0, fontSize: '13px', color: '#8cc4ff', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  {cat.label}
-                </h3>
-                <span style={{ color: '#555', fontSize: '11px' }}>{cat.tools.length} tool(s)</span>
-              </div>
-              <div style={{ color: '#777', fontSize: '11px', marginBottom: '10px' }}>{cat.description}</div>
-              {cat.tools.map(tool => (
-                <div key={tool.name} style={{
-                  marginBottom: '10px',
-                  padding: '10px 12px',
-                  backgroundColor: '#252525',
-                  border: '1px solid #2f2f2f',
-                  borderRadius: '5px',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                    <code style={{
-                      color: '#4caf50',
-                      fontSize: '13px',
-                      fontFamily: 'Consolas, Monaco, monospace',
-                      fontWeight: 'bold',
-                    }}>{tool.name}</code>
-                    {tool.roles.map(r => (
-                      <span key={r} style={{
-                        fontSize: '10px',
-                        padding: '1px 7px',
-                        borderRadius: '10px',
-                        backgroundColor: '#1a1a1a',
-                        border: `1px solid ${ROLE_COLORS[r]}`,
-                        color: ROLE_COLORS[r],
-                      }}>{ROLE_LABELS[r]}</span>
-                    ))}
-                  </div>
-                  <div style={{ color: '#bbb', fontSize: '12px', lineHeight: '1.5', marginBottom: tool.args.length || tool.example ? '6px' : 0 }}>
-                    {tool.description}
-                  </div>
-                  {tool.args.length > 0 && (
-                    <div style={{ marginTop: '6px' }}>
-                      {tool.args.map(arg => (
-                        <div key={arg.name} style={{
-                          fontSize: '11px',
-                          color: '#888',
-                          fontFamily: 'Consolas, Monaco, monospace',
-                          marginLeft: '8px',
-                        }}>
-                          <span style={{ color: '#d0a85c' }}>{arg.name}</span>
-                          <span style={{ color: '#666' }}>: {arg.type}</span>
-                          {arg.required && <span style={{ color: '#f44336', marginLeft: '4px' }}>*</span>}
-                          <span style={{ color: '#666', fontFamily: 'inherit', marginLeft: '8px' }}>{arg.description}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {tool.example && (
-                    <div style={{
-                      marginTop: '6px',
-                      padding: '6px 8px',
-                      backgroundColor: '#1a1a1a',
-                      border: '1px solid #2a2a2a',
-                      borderRadius: '3px',
-                      fontFamily: 'Consolas, Monaco, monospace',
-                      fontSize: '11px',
-                      color: '#8cc4ff',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                    }}>{tool.example}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div style={{
-          padding: '10px 20px',
-          borderTop: '1px solid #333',
-          fontSize: '11px',
-          color: '#666',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}>
-          <span>
-            All tools are accessible to every agent. Role badges indicate <em>typical</em> usage.
-          </span>
-          <span style={{ color: '#555' }}>Source: src/mcp-server/index.ts</span>
-        </div>
+      {/* Filter bar: stays at the top while the tool list scrolls */}
+      <div className="cog-help__filters">
+        <Input
+          type="text"
+          placeholder="Search tools by name, description, or arg..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="cog-help__search"
+        />
+        <span className="cog-help__label">Role:</span>
+        <Segmented
+          value={roleFilter}
+          options={roleOptions}
+          onChange={v => setRoleFilter(v)}
+          ariaLabel="Role"
+        />
       </div>
-    </div>
-  )
-}
 
-function chipStyle(active: boolean, color: string): React.CSSProperties {
-  return {
-    padding: '3px 10px',
-    fontSize: '11px',
-    borderRadius: '12px',
-    border: `1px solid ${active ? color : '#444'}`,
-    backgroundColor: active ? '#2a2a2a' : 'transparent',
-    color: active ? color : '#888',
-    cursor: 'pointer',
-  }
+      {/* Tool list */}
+      {filteredCategories.length === 0 && (
+        <EmptyState icon="search">No tools match the current filter.</EmptyState>
+      )}
+      {filteredCategories.map(cat => (
+        <section key={cat.id} className="cog-help__cat">
+          <div className="cog-help__cathead">
+            <h3 className="cog-help__cattitle">{cat.label}</h3>
+            <span className="cog-help__count">{cat.tools.length} tool(s)</span>
+          </div>
+          <p className="cog-help__catdesc">{cat.description}</p>
+          {cat.tools.map(tool => (
+            <article key={tool.name} className="cog-help__tool">
+              <div className="cog-help__toolhead">
+                <code className="cog-help__name">{tool.name}</code>
+                {tool.roles.map(r => (
+                  <span key={r} className="cog-help__role">{ROLE_LABELS[r]}</span>
+                ))}
+              </div>
+              <p className="cog-help__desc">{tool.description}</p>
+              {tool.args.length > 0 && (
+                <ul className="cog-help__args">
+                  {tool.args.map(arg => (
+                    <li key={arg.name}>
+                      <code className="cog-help__arg">{arg.name}</code>
+                      <code className="cog-help__type">: {arg.type}</code>
+                      {arg.required && <span className="cog-help__req" title="Required">*</span>}
+                      <span className="cog-help__argdesc">{arg.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {tool.example && (
+                <pre className="cog-pre cog-help__example">{tool.example}</pre>
+              )}
+            </article>
+          ))}
+        </section>
+      ))}
+    </Dialog>
+  )
 }

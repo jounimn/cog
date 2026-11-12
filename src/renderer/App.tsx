@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 import { TopBar } from './components/TopBar'
 import { Workspace } from './components/Workspace'
 import { MosaicView } from './components/MosaicView'
@@ -21,7 +21,11 @@ import { UpdateNotice } from './components/UpdateNotice'
 import { WhatsNewDialog } from './components/WhatsNewDialog'
 import { EditAgentDialog } from './components/EditAgentDialog'
 import type { AgentConfig, AgentGroup, RecentProject, WindowPosition, CanvasState, WorkspaceTab, TeamProposal, InboxMessage } from '../shared/types'
+import { appearanceStore, motionStore } from './appearance-store'
+import { AppearanceDrawer } from './components/AppearanceDrawer'
 import { TeamProposalDialog } from './components/TeamProposalDialog'
+import { Button, Icon } from './ui'
+import { topVisibleWindow } from './window-stack'
 
 declare const electronAPI: {
   getProject: () => Promise<RecentProject | null>
@@ -39,6 +43,9 @@ const SCHEDULES_ID = '__schedules__'
 const TROLLBOX_ID = '__trollbox__'
 const INBOX_ID = '__inbox__'
 const BOARD_ID = '__board__'
+const SKETCHPAD_TITLE = 'Sketchpad'
+/** The Sketchpad's title before it lost its emoji: saved layouts may still carry it. */
+const LEGACY_SKETCHPAD_TITLE = '\u{1F4D6} Sketchpad'
 
 // Helpers for per-tab panel isolation
 const PANEL_PREFIXES = [PINBOARD_ID, INFO_ID, FILES_ID, RAC_ID, USAGE_ID, GIT_ID, SCHEDULES_ID, TROLLBOX_ID, INBOX_ID, BOARD_ID]
@@ -253,13 +260,15 @@ export function App(): React.ReactElement {
       'Files': FILES_ID,
       'R.A.C.': RAC_ID,
       'Usage': USAGE_ID,
-      '📖 Sketchpad': BOARD_ID,
+      [SKETCHPAD_TITLE]: BOARD_ID,
+      [LEGACY_SKETCHPAD_TITLE]: BOARD_ID,
     }
     for (const wp of savedWindows) {
       const panelBase = panelTitleToId[wp.agentName]
       if (panelBase) {
         const id = panelIdForTab(panelBase, activeTabId)
-        addWindowAt(id, wp.agentName, wp.x, wp.y, wp.width, wp.height, undefined, activeTabId)
+        const title = wp.agentName === LEGACY_SKETCHPAD_TITLE ? SKETCHPAD_TITLE : wp.agentName
+        addWindowAt(id, title, wp.x, wp.y, wp.width, wp.height, undefined, activeTabId)
       }
     }
     configs.forEach(async (config) => {
@@ -331,6 +340,18 @@ export function App(): React.ReactElement {
   }, [])
 
   const tabAgents = agents.filter(a => !a.tabId || a.tabId === activeTabId)
+
+  // Focused agent for the appearance drawer: the focused Mosaic pane, or in
+  // Canvas the visible window with the highest zIndex (what focusWindow raises).
+  // Panel windows have no agent, so they resolve to undefined.
+  const focusedWindowId = mosaic.mode === 'mosaic'
+    ? (mosaicMaximizedId ?? focusedPaneId ?? undefined)
+    : topVisibleWindow(tabWindows)?.id
+  const focusedAgentName = tabAgents.find(a => a.id === focusedWindowId)?.name
+  const focusedAgent = useMemo(
+    () => (focusedAgentName ? { name: focusedAgentName } : undefined),
+    [focusedAgentName]
+  )
 
   const handleClose = useCallback(async (windowId: string) => {
     // Panel windows just get removed, no agent to kill
@@ -411,9 +432,19 @@ export function App(): React.ReactElement {
     if (inboxOpen) { removeWindow(id) } else { addWindow(id, 'Inbox', undefined, activeTabId) }
   }, [inboxOpen, addWindow, removeWindow, activeTabId])
 
+  // Terminal appearance drawer: open state is remembered across launches.
+  const [appearanceOpen, setAppearanceOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('cog.appearanceDrawer') === '1' } catch { return false }
+  })
+  const setAppearanceDrawer = useCallback((open: boolean, returnFocus = false) => {
+    setAppearanceOpen(open)
+    try { localStorage.setItem('cog.appearanceDrawer', open ? '1' : '0') } catch { /* storage unavailable */ }
+    if (!open && returnFocus) requestAnimationFrame(() => document.getElementById('appearance-toggle')?.focus())
+  }, [])
+
   const toggleBoard = useCallback(() => {
     const id = panelIdForTab(BOARD_ID, activeTabId)
-    if (boardOpen) { removeWindow(id) } else { addWindow(id, '📖 Sketchpad', undefined, activeTabId) }
+    if (boardOpen) { removeWindow(id) } else { addWindow(id, SKETCHPAD_TITLE, undefined, activeTabId) }
   }, [boardOpen, addWindow, removeWindow, activeTabId])
 
   // Load links & groups when the project OR the active tab changes — each
@@ -424,6 +455,11 @@ export function App(): React.ReactElement {
     window.electronAPI.getLinks().then(setLinks)
     window.electronAPI.getGroups().then(setGroups)
   }, [project, activeTabId])
+
+  useEffect(() => {
+    void appearanceStore.load()
+    void motionStore.load()
+  }, [])
 
   // Listen for team proposals: surface modal as soon as the orchestrator submits.
   // On startup, also pull any pending proposals that landed before the renderer
@@ -720,7 +756,7 @@ export function App(): React.ReactElement {
         git: 'Git',
         schedules: 'Schedules',
         trollbox: 'Trollbox',
-        board: '📖 Sketchpad',
+        board: SKETCHPAD_TITLE,
       }
       if (action === 'open' || (action === 'toggle' && !isOpen)) {
         if (isOpen) {
@@ -844,7 +880,10 @@ export function App(): React.ReactElement {
             onToggleBoard={toggleBoard}
             viewMode={mosaic.mode}
             onToggleViewMode={toggleViewMode}
+            appearanceOpen={appearanceOpen}
+            onToggleAppearance={() => setAppearanceDrawer(!appearanceOpen)}
           />
+          <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
           {mosaic.mode === 'mosaic' ? (
           <MosaicView
             windows={tabWindows}
@@ -893,6 +932,12 @@ export function App(): React.ReactElement {
             onWakeAgent={(id) => runSleepAction('wake', id)}
           />
           )}
+          <AppearanceDrawer
+            open={appearanceOpen}
+            onClose={() => setAppearanceDrawer(false, true)}
+            focusedAgent={focusedAgent}
+          />
+          </div>
           {showSpawnDialog && (
             <SpawnDialog
               onSpawn={handleSpawn}
@@ -940,20 +985,18 @@ export function App(): React.ReactElement {
               onApproved={(spawned) => layoutTeamInGrid(spawned)}
             />
           )}
-          <UpdateNotice />
-          {sleepNotice && (
-            <div role="status" style={{
-              position: 'fixed', bottom: '12px', right: '12px', zIndex: 99999, maxWidth: '360px',
-              backgroundColor: '#3a1e1e', border: '1px solid #ff6b6b', borderRadius: '8px',
-              padding: '10px 14px', fontSize: '12px', color: '#e0e0e0', boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-              display: 'flex', gap: '10px', alignItems: 'flex-start'
-            }}>
-              <span style={{ flex: 1 }}>{sleepNotice}</span>
-              <button onClick={() => setSleepNotice(null)} style={{
-                background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '14px', padding: '0 2px'
-              }}>x</button>
-            </div>
-          )}
+          <div className="cog-toasts">
+            <UpdateNotice />
+            {sleepNotice && (
+              <div className="cog-toast cog-toast--danger" role="status">
+                <div className="cog-toast__head">
+                  <Icon name="circle-alert" size={15} />
+                  <span className="cog-toast__text">{sleepNotice}</span>
+                  <Button variant="icon" onClick={() => setSleepNotice(null)} aria-label="Dismiss" title="Dismiss"><Icon name="x" size={14} /></Button>
+                </div>
+              </div>
+            )}
+          </div>
           <WhatsNewDialog />
         </>
       )}

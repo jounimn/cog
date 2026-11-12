@@ -1,121 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import type { TeamProposal, ProposedAgent, AgentConfig } from '../../shared/types'
 import { CLI_PRESETS, CLI_MODELS, ROLE_PRESETS } from './AgentConfigForm'
+import { Button, Checkbox, Dialog, FieldError, Icon, Input, Row, Textarea } from '../ui'
 
 interface Props {
   proposal: TeamProposal
   activeTabId: string
   onClose: () => void
   onApproved: (spawned: Array<{ agentId: string; name: string; gridIndex: number }>) => void
-}
-
-const overlayStyle: React.CSSProperties = {
-  position: 'fixed',
-  top: 0, left: 0, right: 0, bottom: 0,
-  backgroundColor: 'rgba(0, 0, 0, 0.65)',
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  zIndex: 10000
-}
-
-const dialogStyle: React.CSSProperties = {
-  backgroundColor: '#1a1a1a', color: '#e0e0e0',
-  border: '1px solid #3a3a3a', borderRadius: '8px',
-  padding: '20px 24px',
-  width: 'min(880px, 94vw)', maxHeight: '88vh',
-  display: 'flex', flexDirection: 'column', gap: '14px',
-  fontFamily: 'Consolas, "SFMono-Regular", Menlo, Monaco, monospace',
-  boxShadow: '0 20px 60px rgba(0, 0, 0, 0.6)'
-}
-
-const titleStyle: React.CSSProperties = { margin: 0, fontSize: '15px', color: '#fff', fontWeight: 600 }
-
-const summaryStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  backgroundColor: '#222',
-  border: '1px solid #2e2e2e',
-  borderRadius: '6px',
-  fontSize: '12px', color: '#ccc', lineHeight: 1.5,
-  whiteSpace: 'pre-wrap'
-}
-
-const tableWrapStyle: React.CSSProperties = {
-  flex: 1, overflowY: 'auto',
-  border: '1px solid #2e2e2e', borderRadius: '6px'
-}
-
-const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse', fontSize: '12px' }
-
-const thStyle: React.CSSProperties = {
-  textAlign: 'left', padding: '8px 10px',
-  backgroundColor: '#252525', borderBottom: '1px solid #333',
-  color: '#aaa', fontWeight: 500,
-  position: 'sticky', top: 0
-}
-
-const tdStyle: React.CSSProperties = {
-  padding: '6px 8px', borderBottom: '1px solid #2a2a2a',
-  verticalAlign: 'middle'
-}
-
-const editableCellStyle: React.CSSProperties = {
-  cursor: 'text',
-  borderRadius: '3px',
-  padding: '3px 6px',
-  margin: '-3px -6px',
-  display: 'inline-block',
-  minHeight: '18px',
-  minWidth: '40px'
-}
-
-const inputStyle: React.CSSProperties = {
-  backgroundColor: '#1a1a1a', color: '#e0e0e0',
-  border: '1px solid #4a7eb0', borderRadius: '3px',
-  padding: '2px 6px', fontSize: '12px', fontFamily: 'inherit',
-  outline: 'none', width: '100%', boxSizing: 'border-box'
-}
-
-const selectStyle: React.CSSProperties = {
-  ...inputStyle,
-  appearance: 'auto'
-}
-
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
-  resize: 'vertical', minHeight: '60px',
-  fontFamily: 'inherit', lineHeight: 1.4
-}
-
-const buttonRowStyle: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: '8px',
-  justifyContent: 'flex-end', paddingTop: '6px'
-}
-
-const btnBase: React.CSSProperties = {
-  padding: '6px 14px', borderRadius: '4px',
-  border: '1px solid #3a3a3a', fontSize: '12px',
-  fontFamily: 'inherit', cursor: 'pointer'
-}
-
-const btnApprove: React.CSSProperties = {
-  ...btnBase, backgroundColor: '#1f4d2e',
-  borderColor: '#2e7045', color: '#a5e0b3'
-}
-const btnApproveDisabled: React.CSSProperties = {
-  ...btnBase, backgroundColor: '#2a2a2a', color: '#555', cursor: 'not-allowed'
-}
-const btnReject: React.CSSProperties = {
-  ...btnBase, backgroundColor: '#3d1a1a',
-  borderColor: '#6e2c2c', color: '#ff8a8a'
-}
-const btnNeutral: React.CSSProperties = {
-  ...btnBase, backgroundColor: '#2a2a2a', color: '#aaa'
-}
-
-const feedbackInputStyle: React.CSSProperties = {
-  flex: 1,
-  backgroundColor: '#1a1a1a', color: '#e0e0e0',
-  border: '1px solid #3a3a3a', borderRadius: '4px',
-  padding: '6px 8px', fontSize: '12px', fontFamily: 'inherit'
 }
 
 const WINDOWS_SHELLS: Array<AgentConfig['shell']> = ['powershell', 'cmd', 'wsl']
@@ -218,94 +110,74 @@ export function TeamProposalDialog({ proposal, activeTabId, onClose, onApproved 
     onClose()
   }
 
+  // The old backdrop closed only when no spawn/reject was in flight; the header x follows the same rule.
+  const closeIfIdle = () => { if (!submitting) onClose() }
+
   return (
-    <div style={overlayStyle} onClick={(e) => { if (e.target === e.currentTarget && !submitting) onClose() }}>
-      <div style={dialogStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <h2 style={titleStyle}>Team proposal from {proposal.proposedBy}</h2>
-          <span style={{ color: '#666', fontSize: '11px' }}>
-            {proposal.agents.length} agent{proposal.agents.length === 1 ? '' : 's'} · click any cell to edit
-          </span>
-          {isDirty && (
-            <button onClick={resetEdits} style={{ ...btnNeutral, padding: '3px 8px', fontSize: '11px' }}>
-              Reset edits
-            </button>
-          )}
-        </div>
-
-        <div style={summaryStyle}>{proposal.summary}</div>
-
-        <div style={tableWrapStyle}>
-          <table style={tableStyle}>
-            <thead>
-              <tr>
-                <th style={{ ...thStyle, width: '32px' }}>
-                  <input
-                    type="checkbox"
-                    checked={checked.every(Boolean)}
-                    onChange={toggleAll}
-                    title="Toggle all"
-                  />
-                </th>
-                <th style={thStyle}>Name</th>
-                <th style={thStyle}>CLI</th>
-                <th style={thStyle}>Model</th>
-                <th style={thStyle}>Role</th>
-                <th style={thStyle}>Mode</th>
-                <th style={thStyle}>Shell</th>
-                <th style={thStyle} title="Spawn asleep (wake on first task)">
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={editedAgents.length > 0 && editedAgents.every(a => !!a.spawnAsleep)}
-                      onChange={toggleAllAsleep}
-                      title="Spawn every agent asleep (wake on first task)"
-                    />
-                    Asleep
-                  </label>
-                </th>
-                <th style={{ ...thStyle, width: '60px' }}>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {editedAgents.map((agent, i) => (
-                <AgentRow
-                  key={i}
-                  agent={agent}
-                  checked={checked[i]}
-                  expanded={expanded.has(i)}
-                  onToggle={() => toggleChecked(i)}
-                  onToggleExpanded={() => toggleExpanded(i)}
-                  onChange={(partial) => updateAgent(i, partial)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {error && <div style={{ color: '#ff8a8a', fontSize: '12px' }}>{error}</div>}
-
-        <div style={buttonRowStyle}>
-          <input
+    <Dialog
+      title={<>Team proposal from {proposal.proposedBy}</>}
+      icon="users"
+      size="lg"
+      className="cog-proposal"
+      onClose={closeIfIdle}
+      closeOnBackdrop
+      footerStart={
+        <>
+          <Button variant="ghost" className="cog-tone-danger" onClick={handleReject} disabled={submitting}>Reject</Button>
+          <Input
             type="text"
             value={feedback}
             onChange={e => setFeedback(e.target.value)}
             placeholder="Optional reason if rejecting..."
-            style={feedbackInputStyle}
+            className="cog-proposal__feedback"
             disabled={submitting}
           />
-          <button onClick={onClose} style={btnNeutral} disabled={submitting}>Close</button>
-          <button onClick={handleReject} style={btnReject} disabled={submitting}>Reject</button>
-          <button
-            onClick={handleApprove}
-            style={checkedCount === 0 || submitting ? btnApproveDisabled : btnApprove}
-            disabled={checkedCount === 0 || submitting}
-          >
+        </>
+      }
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={submitting}>Close</Button>
+          <Button onClick={handleApprove} disabled={checkedCount === 0 || submitting}>
             {submitting ? 'Spawning…' : `Approve & Spawn ${checkedCount}`}
-          </button>
-        </div>
+          </Button>
+        </>
+      }
+    >
+      <div className="cog-proposal__summary">{proposal.summary}</div>
+
+      <div className="cog-proposal__bar">
+        <Checkbox checked={checked.every(Boolean)} onChange={toggleAll} title="Toggle all">All</Checkbox>
+        <Checkbox
+          checked={editedAgents.length > 0 && editedAgents.every(a => !!a.spawnAsleep)}
+          onChange={toggleAllAsleep}
+          title="Spawn every agent asleep (wake on first task)"
+        >Asleep</Checkbox>
+        <span className="cog-proposal__hint">
+          {proposal.agents.length} agent{proposal.agents.length === 1 ? '' : 's'} · click any cell to edit
+        </span>
+        {isDirty && (
+          <Button variant="ghost" className="cog-proposal__reset" onClick={resetEdits}>
+            Reset edits
+          </Button>
+        )}
       </div>
-    </div>
+
+      <div className="cog-dialog__list cog-proposal__list">
+        {editedAgents.map((agent, i) => (
+          <AgentRow
+            key={i}
+            agent={agent}
+            checked={checked[i]}
+            expanded={expanded.has(i)}
+            onToggle={() => toggleChecked(i)}
+            onToggleExpanded={() => toggleExpanded(i)}
+            onChange={(partial) => updateAgent(i, partial)}
+          />
+        ))}
+      </div>
+
+      {error && <FieldError>{error}</FieldError>}
+    </Dialog>
   )
 }
 
@@ -323,112 +195,102 @@ function AgentRow({ agent, checked, expanded, onToggle, onToggleExpanded, onChan
   const modelWarning = agent.model ? MODEL_WARNINGS[agent.model] : undefined
 
   return (
-    <>
-      <tr>
-        <td style={tdStyle}>
-          <input type="checkbox" checked={checked} onChange={onToggle} />
-        </td>
-        <td style={tdStyle}>
+    <div className="cog-proposal__item">
+      <Row
+        icon={<Checkbox checked={checked} onChange={onToggle} title="Spawn this agent" />}
+        title={
           <EditableText
             value={agent.name}
             onChange={(v) => onChange({ name: v })}
             placeholder="agent-name"
           />
-        </td>
-        <td style={tdStyle}>
-          <EditableSelect
-            value={agent.cli}
-            options={CLI_PRESETS.filter(p => p.value).map(p => ({ label: p.label, value: p.value }))}
-            onChange={(v) => onChange({ cli: v })}
-          />
-        </td>
-        <td style={tdStyle}>
-          <EditableSelect
-            value={agent.model || ''}
-            options={modelOptions}
-            onChange={(v) => onChange({ model: v || undefined })}
-            warning={modelWarning}
-            allowEmpty
-            emptyLabel="default"
-          />
-        </td>
-        <td style={tdStyle}>
-          <EditableSelect
-            value={agent.role}
-            options={ROLE_PRESETS.filter(r => r.value).map(r => ({ label: r.label, value: r.value }))}
-            onChange={(v) => onChange({ role: v })}
-            allowFreeform
-            freeformPlaceholder="custom role"
-          />
-        </td>
-        <td style={tdStyle}>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
+        }
+        meta={
+          <span className="cog-proposal__meta">
+            <EditableSelect
+              value={agent.role}
+              options={ROLE_PRESETS.filter(r => r.value).map(r => ({ label: r.label, value: r.value }))}
+              onChange={(v) => onChange({ role: v })}
+              allowFreeform
+              freeformPlaceholder="custom role"
+            />
+            <span aria-hidden="true">·</span>
+            <EditableSelect
+              value={agent.cli}
+              options={CLI_PRESETS.filter(p => p.value).map(p => ({ label: p.label, value: p.value }))}
+              onChange={(v) => onChange({ cli: v })}
+              mono
+            />
+          </span>
+        }
+        actions={
+          <>
+            <span className="cog-proposal__cell">
+              <span className="cog-proposal__k">Model</span>
+              <EditableSelect
+                value={agent.model || ''}
+                options={modelOptions}
+                onChange={(v) => onChange({ model: v || undefined })}
+                warning={modelWarning}
+                allowEmpty
+                emptyLabel="default"
+                mono
+              />
+            </span>
+            <span className="cog-proposal__cell">
+              <span className="cog-proposal__k">Shell</span>
+              <EditableSelect
+                value={agent.shell || ''}
+                options={ALL_SHELLS.map(s => ({ label: shellLabel(s!), value: s! }))}
+                onChange={(v) => onChange({ shell: (v || undefined) as AgentConfig['shell'] | undefined })}
+                allowEmpty
+                emptyLabel="default"
+              />
+            </span>
+            <Checkbox
               checked={agent.autoMode}
-              onChange={(e) => onChange({ autoMode: e.target.checked })}
-            />
-            <span style={{ fontSize: '11px', color: agent.autoMode ? '#f5a25a' : '#888' }}>
-              {agent.autoMode ? 'auto' : 'manual'}
-            </span>
-          </label>
-        </td>
-        <td style={tdStyle}>
-          <EditableSelect
-            value={agent.shell || ''}
-            options={ALL_SHELLS.map(s => ({ label: shellLabel(s!), value: s! }))}
-            onChange={(v) => onChange({ shell: (v || undefined) as AgentConfig['shell'] | undefined })}
-            allowEmpty
-            emptyLabel="default"
-          />
-        </td>
-        <td style={tdStyle}>
-          <label
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}
-            title="Spawn asleep (wake on first task)"
-          >
-            <input
-              type="checkbox"
+              onChange={(v) => onChange({ autoMode: v })}
+              className="cog-proposal__check"
+            >
+              <span className={agent.autoMode ? 'cog-tone-warning' : 'cog-proposal__off'}>
+                {agent.autoMode ? 'auto' : 'manual'}
+              </span>
+            </Checkbox>
+            <Checkbox
               checked={!!agent.spawnAsleep}
-              onChange={(e) => onChange({ spawnAsleep: e.target.checked || undefined })}
-            />
-            <span style={{ fontSize: '11px', color: agent.spawnAsleep ? '#8cc4ff' : '#888' }}>
-              {agent.spawnAsleep ? 'asleep' : 'awake'}
-            </span>
-          </label>
-        </td>
-        <td style={tdStyle}>
-          <button
-            onClick={onToggleExpanded}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: agent.ceoNotes ? '#8cc4ff' : '#666',
-              fontSize: '11px', padding: '2px 6px'
-            }}
-            title={agent.ceoNotes ? 'Edit CEO notes' : 'Add CEO notes'}
-          >
-            {expanded ? 'hide' : (agent.ceoNotes ? 'edit' : 'add')}
-          </button>
-        </td>
-      </tr>
+              onChange={(v) => onChange({ spawnAsleep: v || undefined })}
+              title="Spawn asleep (wake on first task)"
+              className="cog-proposal__check"
+            >
+              <span className={agent.spawnAsleep ? undefined : 'cog-proposal__off'}>
+                {agent.spawnAsleep ? 'asleep' : 'awake'}
+              </span>
+            </Checkbox>
+            <Button
+              variant="ghost"
+              className={agent.ceoNotes ? 'cog-proposal__notes cog-proposal__notes--set' : 'cog-proposal__notes'}
+              onClick={onToggleExpanded}
+              title={agent.ceoNotes ? 'Edit CEO notes' : 'Add CEO notes'}
+              aria-expanded={expanded}
+            >
+              {expanded ? 'hide' : (agent.ceoNotes ? 'edit' : 'add')}
+            </Button>
+          </>
+        }
+      />
       {expanded && (
-        <tr>
-          <td style={tdStyle}></td>
-          <td colSpan={8} style={{ ...tdStyle, paddingBottom: '12px' }}>
-            <div style={{ color: '#666', fontSize: '11px', marginBottom: '4px' }}>
-              CEO notes — what this agent should do:
-            </div>
-            <textarea
-              value={agent.ceoNotes}
-              onChange={(e) => onChange({ ceoNotes: e.target.value })}
-              placeholder="e.g. Focus on the API layer. Coordinate with the orchestrator before merging."
-              style={textareaStyle}
-              rows={4}
-            />
-          </td>
-        </tr>
+        <label className="cog-field cog-proposal__notesfield">
+          <span className="cog-field__label">CEO notes — what this agent should do:</span>
+          <Textarea
+            value={agent.ceoNotes}
+            onChange={(e) => onChange({ ceoNotes: e.target.value })}
+            placeholder="e.g. Focus on the API layer. Coordinate with the orchestrator before merging."
+            className="cog-proposal__textarea"
+            rows={4}
+          />
+        </label>
       )}
-    </>
+    </div>
   )
 }
 
@@ -454,7 +316,7 @@ function EditableText({ value, onChange, placeholder }: {
 
   if (editing) {
     return (
-      <input
+      <Input
         type="text"
         value={draft}
         autoFocus
@@ -465,24 +327,24 @@ function EditableText({ value, onChange, placeholder }: {
           else if (e.key === 'Escape') cancel()
         }}
         placeholder={placeholder}
-        style={inputStyle}
+        className="cog-proposal__edit"
       />
     )
   }
   return (
     <span
-      style={{ ...editableCellStyle, color: '#ddd', fontWeight: 500 }}
+      className="cog-proposal__cellval cog-proposal__name"
       onClick={() => setEditing(true)}
       title="Click to edit"
     >
-      {value || <span style={{ color: '#666' }}>{placeholder}</span>}
+      {value || <span className="cog-proposal__empty">{placeholder}</span>}
     </span>
   )
 }
 
 interface SelectOpt { label: string; value: string }
 
-function EditableSelect({ value, options, onChange, allowEmpty, emptyLabel, allowFreeform, freeformPlaceholder, warning }: {
+function EditableSelect({ value, options, onChange, allowEmpty, emptyLabel, allowFreeform, freeformPlaceholder, warning, mono }: {
   value: string
   options: SelectOpt[]
   onChange: (v: string) => void
@@ -491,6 +353,8 @@ function EditableSelect({ value, options, onChange, allowEmpty, emptyLabel, allo
   allowFreeform?: boolean
   freeformPlaceholder?: string
   warning?: string
+  /** Plex Mono for data values (CLI, model names). */
+  mono?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const matched = options.find(o => o.value === value)
@@ -502,31 +366,35 @@ function EditableSelect({ value, options, onChange, allowEmpty, emptyLabel, allo
   }
 
   if (editing) {
+    // A native <select> in the kit's .cog-select frame: it needs autoFocus and
+    // onBlur, and options with duplicate empty values, which ui/Select does not take.
     return (
-      <select
-        value={value}
-        autoFocus
-        onChange={(e) => {
-          const v = e.target.value
-          if (v === '__custom__') {
-            // Switch to freeform: blank out so the FreeformInput shows below.
-            // Setting to a sentinel triggers the inline text input render path.
-            onChange('')
-            setEditing(false)
-            // Defer so the user can immediately re-click to type.
-            setTimeout(() => setEditing(true), 0)
-          } else {
-            commit(v)
-          }
-        }}
-        onBlur={() => setEditing(false)}
-        style={selectStyle}
-      >
-        {allowEmpty && <option value="">{emptyLabel || '(default)'}</option>}
-        {options.map(o => <option key={o.value || '__empty__'} value={o.value}>{o.label}</option>)}
-        {isFreeform && <option value={value}>{value} (custom)</option>}
-        {allowFreeform && <option value="__custom__">— Custom… —</option>}
-      </select>
+      <span className="cog-select cog-proposal__select">
+        <select
+          value={value}
+          autoFocus
+          onChange={(e) => {
+            const v = e.target.value
+            if (v === '__custom__') {
+              // Switch to freeform: blank out so the FreeformInput shows below.
+              // Setting to a sentinel triggers the inline text input render path.
+              onChange('')
+              setEditing(false)
+              // Defer so the user can immediately re-click to type.
+              setTimeout(() => setEditing(true), 0)
+            } else {
+              commit(v)
+            }
+          }}
+          onBlur={() => setEditing(false)}
+        >
+          {allowEmpty && <option value="">{emptyLabel || '(default)'}</option>}
+          {options.map(o => <option key={o.value || '__empty__'} value={o.value}>{o.label}</option>)}
+          {isFreeform && <option value={value}>{value} (custom)</option>}
+          {allowFreeform && <option value="__custom__">— Custom… —</option>}
+        </select>
+        <span className="cog-select__chev"><Icon name="chevron-down" size={14} /></span>
+      </span>
     )
   }
 
@@ -535,30 +403,33 @@ function EditableSelect({ value, options, onChange, allowEmpty, emptyLabel, allo
     // show a text input. They can still click "Custom" in the dropdown to
     // re-enter this mode after picking a preset.
     return (
-      <span style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
-        <input
+      <span className="cog-proposal__freeform">
+        <Input
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={freeformPlaceholder || 'value'}
-          style={{ ...inputStyle, width: '110px' }}
+          className="cog-proposal__edit cog-proposal__edit--freeform"
         />
-        <button
+        <Button
+          variant="icon"
           onClick={() => setEditing(true)}
-          style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: '11px' }}
           title="Pick from presets"
-        >▼</button>
+          aria-label="Pick from presets"
+        ><Icon name="chevron-down" size={14} /></Button>
       </span>
     )
   }
 
-  const display = value || (emptyLabel ? <span style={{ color: '#666' }}>{emptyLabel}</span> : '')
-  const cellStyle: React.CSSProperties = warning
-    ? { ...editableCellStyle, color: '#f5a25a', borderBottom: '1px dotted #f5a25a' }
-    : { ...editableCellStyle, color: '#ddd' }
+  const display = value || (emptyLabel ? <span className="cog-proposal__empty">{emptyLabel}</span> : '')
+  const cls = [
+    'cog-proposal__cellval',
+    mono && value && 'cog-mono',
+    warning && 'cog-proposal__cellval--warn cog-tone-warning'
+  ].filter(Boolean).join(' ')
   return (
-    <span style={cellStyle} onClick={() => setEditing(true)} title={warning || 'Click to edit'}>
-      {display}{warning ? ' \u26A0' : ''}
+    <span className={cls} onClick={() => setEditing(true)} title={warning || 'Click to edit'}>
+      {display}{warning ? <Icon name="triangle-alert" size={12} /> : ''}
     </span>
   )
 }

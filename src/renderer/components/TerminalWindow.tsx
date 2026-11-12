@@ -1,14 +1,17 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useMemo, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { AgentTheme } from '../../shared/types'
-import { resolveTheme } from '../themes'
+import { appearanceStore, useAppearance } from '../appearance-store'
+import { resolveAppearance, fontLoadSpecs } from '../terminal-appearance'
 import { createTerminalRegistry } from '../terminal-registry'
 import { debounce } from '../debounce'
+import { createLatestWins, type LatestWins } from '../latest-wins'
 
 interface TerminalWindowProps {
   agentId: string
+  agentName: string
   theme?: AgentTheme
 }
 
@@ -17,16 +20,19 @@ interface TerminalHandle {
   fit: FitAddon
   /** The DOM node xterm rendered into. Re-parented on every mount. */
   element: HTMLDivElement
+  /** Set once dispose() ran; async font work must not touch the terminal afterwards. */
+  disposed: boolean
+  /** Orders font applications: only the most recent request may set the font. */
+  fontRequests: LatestWins
   dispose(): void
 }
 
-function xtermTheme(theme?: AgentTheme) {
-  const resolved = resolveTheme(theme)
-  return {
-    background: resolved.bg,
-    foreground: resolved.text,
-    cursor: resolved.text,
-    selectionBackground: '#444'
+/** Resolve once the bundled faces of a font stack are loaded (failure is ignored). */
+async function ensureFontsLoaded(family: string, size: number): Promise<void> {
+  try {
+    await Promise.all(fontLoadSpecs(family, size).map(s => document.fonts.load(s)))
+  } catch {
+    // measure with whatever is available
   }
 }
 
@@ -40,10 +46,14 @@ function createTerminal(agentId: string): TerminalHandle {
   element.style.width = '100%'
   element.style.height = '100%'
 
+  // Global appearance only; the component's effect is the single owner of the
+  // font: it applies the agent-specific resolution (name + theme) on mount.
+  const initial = resolveAppearance(appearanceStore.get(), '')
   const term = new Terminal({
-    theme: xtermTheme(),
-    fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
-    fontSize: 13,
+    theme: initial.xterm,
+    // Real family is applied after its faces load, so cells are measured with the right glyphs.
+    fontFamily: 'monospace',
+    fontSize: initial.fontSize,
     cursorBlink: true,
     scrollback: 5000
   })
@@ -89,17 +99,22 @@ function createTerminal(agentId: string): TerminalHandle {
     if (filtered) window.electronAPI.writeToPty(agentId, filtered)
   })
 
-  return {
+  const handle: TerminalHandle = {
     term,
     fit,
     element,
+    disposed: false,
+    fontRequests: createLatestWins(),
     dispose() {
+      handle.disposed = true
       cleanupOutput()
       disposable.dispose()
       term.dispose()
       element.remove()
     }
   }
+
+  return handle
 }
 
 export const terminalRegistry = createTerminalRegistry<TerminalHandle>(createTerminal)
@@ -109,8 +124,13 @@ export function focusTerminal(agentId: string): void {
   if (terminalRegistry.has(agentId)) terminalRegistry.acquire(agentId).term.focus()
 }
 
-export function TerminalWindow({ agentId, theme }: TerminalWindowProps): React.ReactElement {
+export function TerminalWindow({ agentId, agentName, theme }: TerminalWindowProps): React.ReactElement {
   const containerRef = useRef<HTMLDivElement>(null)
+  const appearance = useAppearance()
+  const resolved = useMemo(
+    () => resolveAppearance(appearance, agentName, theme),
+    [appearance, agentName, theme]
+  )
 
   useEffect(() => {
     const container = containerRef.current
@@ -149,18 +169,31 @@ export function TerminalWindow({ agentId, theme }: TerminalWindowProps): React.R
     }
   }, [agentId])
 
-  // Live-update xterm theme when the prop changes — don't re-create the terminal
+  // The one place the font is applied: live-apply font, size and colours
+  // (appearance, agent name or theme change) without re-creating the terminal.
+  // Font loads can settle out of order, so only the latest request applies;
+  // every refit is followed by the PTY resize so xterm and PTY cols agree.
   useEffect(() => {
     if (!terminalRegistry.has(agentId)) return
-    terminalRegistry.acquire(agentId).term.options.theme = xtermTheme(theme)
-  }, [agentId, theme])
+    const handle = terminalRegistry.acquire(agentId)
+    const { term, fit } = handle
+    term.options.theme = resolved.xterm
+    const isLatest = handle.fontRequests.begin()
+    void ensureFontsLoaded(resolved.fontFamily, resolved.fontSize).then(() => {
+      if (!isLatest() || handle.disposed) return
+      term.options.fontFamily = resolved.fontFamily
+      term.options.fontSize = resolved.fontSize
+      if (!containerRef.current?.contains(term.element ?? null)) return
+      fit.fit()
+      window.electronAPI.resizePty(agentId, term.cols, term.rows)
+    })
+  }, [agentId, resolved.fontFamily, resolved.fontSize, resolved.xterm])
 
-  const resolved = resolveTheme(theme)
   return (
     <div
       ref={containerRef}
       onWheel={(e) => e.stopPropagation()}
-      style={{ width: '100%', height: '100%', backgroundColor: resolved.bg }}
+      style={{ width: '100%', height: '100%', boxSizing: 'border-box', padding: '6px 8px', backgroundColor: resolved.xterm.background }}
     />
   )
 }

@@ -3,7 +3,8 @@ import { sessionStrategyFor } from '../shared/session-strategy'
 
 export interface CardPresentation {
   opacity: number
-  titlePrefix: string
+  /** Lucide icon shown before the plate title, or null for none. */
+  titleIcon: 'moon' | 'loader' | null
   menu: Array<'sleep' | 'wake'>
 }
 
@@ -30,9 +31,9 @@ export function canSleepNow(input: CardSleepInput): boolean {
 
 export function cardPresentation(input: AgentStatus | CardSleepInput): CardPresentation {
   const info: CardSleepInput = typeof input === 'string' ? { status: input } : input
-  if (info.status === 'sleeping') return { opacity: 0.5, titlePrefix: '🌙 ', menu: ['wake'] }
-  if (info.status === 'waking') return { opacity: 0.5, titlePrefix: '⏳ ', menu: [] }
-  return { opacity: 1, titlePrefix: '', menu: canSleepNow(info) ? ['sleep'] : [] }
+  if (info.status === 'sleeping') return { opacity: 0.5, titleIcon: 'moon', menu: ['wake'] }
+  if (info.status === 'waking') return { opacity: 0.5, titleIcon: 'loader', menu: [] }
+  return { opacity: 1, titleIcon: null, menu: canSleepNow(info) ? ['sleep'] : [] }
 }
 
 /** A sleep-settings number field's typed text, or null when it is not a whole number >= 0 (empty included). */

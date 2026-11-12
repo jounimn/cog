@@ -20,11 +20,11 @@ let nextZ = 1
 export function useWindowManager() {
   const [windows, setWindows] = useState<Map<string, WindowState>>(new Map())
 
-  const [zoom, setZoomState] = useState(1.0)
+  const [zoom, setZoomState] = useState(0.9)
   const [pan, setPanState] = useState({ x: 0, y: 0 })
 
   // Refs for stable closures (addWindow needs current zoom/pan without recreating)
-  const zoomRef = useRef(1.0)
+  const zoomRef = useRef(0.9)
   const panRef = useRef({ x: 0, y: 0 })
   // Size of the canvas viewport element (reported by Workspace). Used to centre
   // spawns on the visible canvas rather than on the whole BrowserWindow.

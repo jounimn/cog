@@ -1,8 +1,7 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { TerminalWindow } from './TerminalWindow'
 import { PinboardPanel } from './PinboardPanel'
 import { InfoChannelPanel } from './InfoChannelPanel'
-import { FilePanel } from './FilePanel'
 import { RacPanel } from './RacPanel'
 import { UsagePanel } from './UsagePanel'
 import { GitPanel } from './GitPanel'
@@ -14,36 +13,18 @@ import { RacAgentChat } from './RacAgentChat'
 import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import { getPanelType } from '../panel-ids'
+import { windowAgent } from './window-heading'
+import { Loading } from '../ui'
 
-export const STATUS_COLORS: Record<string, string> = {
-  idle: '#888',
-  active: '#4caf50',
-  working: '#ffc107',
-  disconnected: '#f44336',
-  sleeping: '#5c6bc0',
-  waking: '#29b6f6'
-}
+export { windowAgent, windowHeading, type WindowHeading } from './window-heading'
+
+// Monaco is ~10 MB: keep it out of the main chunk until a Files panel opens.
+const FilePanel = lazy(() => import('./FilePanel').then(m => ({ default: m.FilePanel })))
 
 export interface WindowContentContext {
   agents: AgentState[]
   tabs: WorkspaceTab[]
   activeTabId?: string
-}
-
-export function windowAgent(win: WindowState, agents: AgentState[]): AgentState | undefined {
-  return !getPanelType(win.id) ? agents.find(a => a.id === win.id) : undefined
-}
-
-export function windowTitle(win: WindowState, agents: AgentState[]): string {
-  const agent = windowAgent(win, agents)
-  return agent
-    ? `${agent.name} (${agent.cli}) · ${agent.role}`
-    : win.title
-}
-
-export function windowStatusColor(win: WindowState, agents: AgentState[]): string | undefined {
-  const agent = windowAgent(win, agents)
-  return agent ? STATUS_COLORS[agent.status] ?? '#888' : undefined
 }
 
 export function renderWindowContent(win: WindowState, ctx: WindowContentContext): React.ReactNode {
@@ -56,7 +37,7 @@ export function renderWindowContent(win: WindowState, ctx: WindowContentContext)
   } else if (panelType === 'info') {
     return <InfoChannelPanel tabId={activeTabId} />
   } else if (panelType === 'files') {
-    return <FilePanel />
+    return <Suspense fallback={<Loading />}><FilePanel /></Suspense>
   } else if (panelType === 'rac') {
     return <RacPanel />
   } else if (panelType === 'usage') {
@@ -74,5 +55,5 @@ export function renderWindowContent(win: WindowState, ctx: WindowContentContext)
   } else if (agent && agent.name.startsWith('rac-')) {
     return <RacAgentChat agentName={agent.name} />
   }
-  return <TerminalWindow agentId={win.id} theme={agent?.theme} />
+  return <TerminalWindow agentId={win.id} agentName={agent?.name ?? ''} theme={agent?.theme} />
 }

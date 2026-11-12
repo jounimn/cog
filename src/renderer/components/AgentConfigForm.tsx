@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { AgentConfig } from '../../shared/types'
 import { SkillBrowser } from './SkillBrowser'
+import { Button, Checkbox, Field, Icon, Input, Row, Select, Textarea } from '../ui'
 import { agentSlug, defaultWorktreeForRole } from '../../shared/agent-worktree-defaults'
 
 export const ROLE_PRESETS = [
@@ -248,256 +249,204 @@ export function AgentConfigForm({ value, onChange, errors, hideSpawnAsleep }: Ag
 
   return (
     <>
-      <label style={labelStyle}>
-        Name
-        <input value={value.name} onChange={e => set('name', e.target.value)} required style={inputStyle} placeholder="worker-1" />
-        {errors?.name && <span style={errorStyle}>{errors.name}</span>}
-      </label>
+      <Field label="Name" error={errors?.name}>
+        <Input value={value.name} onChange={e => set('name', e.target.value)} required placeholder="worker-1" aria-invalid={errors?.name ? true : undefined} />
+      </Field>
 
-      <label style={labelStyle}>
-        CLI
-        <select value={value.cli} onChange={e => set('cli', e.target.value)} style={inputStyle}>
-          {CLI_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </select>
-      </label>
+      <Field label="CLI">
+        <Select value={value.cli} onChange={v => set('cli', v)} options={CLI_PRESETS} />
+      </Field>
 
       {value.cli === '' && (
-        <label style={labelStyle}>
-          Custom Command
-          <input value={value.customCli} onChange={e => set('customCli', e.target.value)} required style={inputStyle} placeholder="my-agent --flag" />
-        </label>
+        <Field label="Custom command">
+          <Input mono value={value.customCli} onChange={e => set('customCli', e.target.value)} required placeholder="my-agent --flag" />
+        </Field>
       )}
 
       {CLI_MODELS[value.cli] && (
-        <label style={labelStyle}>
-          Model
-          <select value={value.model} onChange={e => set('model', e.target.value)} style={inputStyle}>
-            {CLI_MODELS[value.cli].map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
-        </label>
+        <Field label="Model">
+          <Select value={value.model} onChange={v => set('model', v)} options={CLI_MODELS[value.cli]} />
+        </Field>
       )}
 
       {value.cli === 'grok' && (
-        <div style={{ color: '#d0a85c', fontSize: '11px' }}>
+        <p className="cog-agentform__note cog-tone-warning">
           Experimental integration: community-maintained Grok CLI support may change underneath us.
-        </div>
+        </p>
       )}
       {value.cli === 'pi' && (
-        <div style={{ color: '#7da87d', fontSize: '11px' }}>
+        <p className="cog-agentform__note cog-tone-success">
           Pi runs tools without permission prompts and uses the model/provider you
           set up inside Pi. The Cog auto-installs pi-mcp-adapter on first launch so
           Pi can reach the hub tools. Requires the `pi` CLI on your PATH.
-        </div>
+        </p>
       )}
 
       {value.cli === 'openclaude' && (
-        <label style={labelStyle}>
-          Provider
-          <select
+        <Field label="Provider">
+          <Select
             value={value.providerUrl}
-            onChange={e => set('providerUrl', e.target.value)}
-            style={inputStyle}
-          >
-            {OPENCLAUDE_PROVIDERS.map(p => (
-              <option key={p.url} value={p.url}>{p.label}</option>
-            ))}
-          </select>
-        </label>
+            onChange={v => set('providerUrl', v)}
+            options={OPENCLAUDE_PROVIDERS.map(p => ({ value: p.url, label: p.label }))}
+          />
+        </Field>
       )}
 
       {value.cli === 'openclaude' && value.providerUrl === '' && (
-        <label style={labelStyle}>
-          Custom Provider URL
-          <input
+        <Field label="Custom provider URL">
+          <Input
+            mono
             value={value.customProviderUrl}
             onChange={e => set('customProviderUrl', e.target.value)}
-            style={inputStyle}
             placeholder="https://api.example.com/v1"
             required
           />
-        </label>
+        </Field>
       )}
 
       {value.cli === 'openclaude' && value.model === '' && (
-        <label style={labelStyle}>
-          Custom Model Name
-          <input
+        <Field label="Custom model name">
+          <Input
+            mono
             value={value.customModel}
             onChange={e => set('customModel', e.target.value)}
-            style={inputStyle}
             placeholder="e.g. gpt-4o-mini, codellama"
           />
-        </label>
+        </Field>
       )}
 
-      <label style={labelStyle}>
-        Working Directory
-        <div style={{ display: 'flex', gap: '4px' }}>
-          <input value={value.cwd} onChange={e => set('cwd', e.target.value)} style={{ ...inputStyle, flex: 1 }} />
-          <button
-            type="button"
+      <Field label="Working directory" error={errors?.cwd}>
+        <div className="cog-field__inline">
+          <Input mono value={value.cwd} onChange={e => set('cwd', e.target.value)} aria-invalid={errors?.cwd ? true : undefined} />
+          <Button
+            variant="ghost"
             onClick={() => window.electronAPI.browseDirectory(value.cwd).then(d => { if (d) set('cwd', d) })}
-            style={{
-              padding: '8px 12px', backgroundColor: '#2a2a2a', border: '1px solid #444',
-              borderRadius: '4px', color: '#aaa', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap'
-            }}
           >
-            Browse
-          </button>
+            <Icon name="folder-open" size={14} />Browse
+          </Button>
         </div>
-        {errors?.cwd && <span style={errorStyle}>{errors.cwd}</span>}
-      </label>
+      </Field>
 
-      <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-        <input
-          type="checkbox"
-          checked={effectiveCli === 'terminal' ? false : value.worktree}
-          disabled={effectiveCli === 'terminal'}
-          onChange={e => onChange(prev => ({ ...prev, worktree: e.target.checked, worktreeTouched: true }))}
-        />
-        Isolated worktree
-        <span style={{ color: '#666', fontSize: '11px' }}>
-          .cog/worktrees/{worktreeSlug} · branch cog/{worktreeSlug}
-        </span>
-      </label>
+      <div className="cog-dialog__checks">
+        <div>
+          <Checkbox
+            checked={effectiveCli === 'terminal' ? false : value.worktree}
+            disabled={effectiveCli === 'terminal'}
+            onChange={checked => onChange(prev => ({ ...prev, worktree: checked, worktreeTouched: true }))}
+          >
+            Isolated worktree
+          </Checkbox>
+          <div className="cog-dialog__checkhint">
+            <span className="cog-mono">.cog/worktrees/{worktreeSlug}</span> · branch <span className="cog-mono">cog/{worktreeSlug}</span>
+          </div>
+        </div>
 
-      {!hideSpawnAsleep && (
-        <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-          <input
-            type="checkbox"
+        {!hideSpawnAsleep && (
+          <Checkbox
             checked={value.spawnAsleep}
-            onChange={e => onChange(prev => ({ ...prev, spawnAsleep: e.target.checked }))}
-          />
-          Spawn asleep (wake on first task)
-        </label>
-      )}
-
-      <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-        <input
-          type="checkbox"
-          checked={value.neverSleep}
-          onChange={e => onChange(prev => ({ ...prev, neverSleep: e.target.checked }))}
-        />
-        Never sleep
-      </label>
-
-      <label style={labelStyle}>
-        Role
-        <select value={value.role} onChange={e => set('role', e.target.value)} style={inputStyle}>
-          {ROLE_PRESETS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
-        {ROLE_PRESETS.find(r => r.value === value.role)?.hint && (
-          <span style={{ color: '#555', fontSize: '11px' }}>{ROLE_PRESETS.find(r => r.value === value.role)?.hint}</span>
+            onChange={checked => onChange(prev => ({ ...prev, spawnAsleep: checked }))}
+          >
+            Spawn asleep (wake on first task)
+          </Checkbox>
         )}
-      </label>
+
+        <Checkbox
+          checked={value.neverSleep}
+          onChange={checked => onChange(prev => ({ ...prev, neverSleep: checked }))}
+        >
+          Never sleep
+        </Checkbox>
+      </div>
+
+      <Field label="Role" help={ROLE_PRESETS.find(r => r.value === value.role)?.hint}>
+        <Select value={value.role} onChange={v => set('role', v)} options={ROLE_PRESETS} />
+      </Field>
 
       {value.role === '' && (
-        <label style={labelStyle}>
-          Custom Role
-          <input value={value.customRole} onChange={e => set('customRole', e.target.value)} required style={inputStyle} placeholder="e.g. Monitor, Tester" />
-        </label>
+        <Field label="Custom role">
+          <Input value={value.customRole} onChange={e => set('customRole', e.target.value)} required placeholder="e.g. Monitor, Tester" />
+        </Field>
       )}
 
-      <label style={labelStyle}>
-        Skills (optional)
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', minHeight: '28px' }}>
-          {value.selectedSkills.map(skill => (
-            <span key={skill.id} style={{
-              padding: '2px 8px',
-              backgroundColor: '#2d3a4d',
-              border: '1px solid #4a6fa5',
-              borderRadius: '12px',
-              fontSize: '11px',
-              color: '#8cb4e0',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}>
-              {skill.name}
-              <span
-                onClick={() => set('selectedSkills', value.selectedSkills.filter(s => s.id !== skill.id))}
-                style={{ cursor: 'pointer', color: '#666' }}
-              >x</span>
-            </span>
-          ))}
-          <button
-            type="button"
-            onClick={() => setShowSkillBrowser(true)}
-            style={{
-              padding: '2px 10px',
-              backgroundColor: '#2a2a2a',
-              border: '1px solid #444',
-              borderRadius: '12px',
-              fontSize: '11px',
-              color: '#888',
-              cursor: 'pointer'
-            }}
-          >+ Add Skills</button>
-        </div>
-      </label>
+      <div className="cog-field cog-agentform__skills" role="group" aria-label="Skills (optional)">
+        <span className="cog-field__label">Skills (optional)</span>
+        {value.selectedSkills.length > 0 && (
+          <div className="cog-dialog__list">
+            {value.selectedSkills.map(skill => (
+              <Row
+                key={skill.id}
+                icon={<Icon name="check" size={12} />}
+                title={skill.name}
+                actions={
+                  <Button
+                    variant="icon"
+                    onClick={() => set('selectedSkills', value.selectedSkills.filter(s => s.id !== skill.id))}
+                    aria-label={`Remove ${skill.name}`}
+                    title="Remove"
+                  >
+                    <Icon name="x" size={14} />
+                  </Button>
+                }
+              />
+            ))}
+          </div>
+        )}
+        <Button variant="ghost" className="cog-agentform__addskills" onClick={() => setShowSkillBrowser(true)}>
+          <Icon name="plus" size={14} />Add skills
+        </Button>
+      </div>
 
-      <label style={labelStyle}>
-        CEO Notes
-        <textarea
+      <Field label="CEO notes">
+        <Textarea
           value={value.ceoNotes}
           onChange={e => set('ceoNotes', e.target.value)}
-          style={{ ...inputStyle, height: '80px', resize: 'vertical' }}
+          rows={4}
+          className="cog-agentform__notes"
           placeholder="Instructions for this agent..."
         />
-      </label>
+      </Field>
 
-      <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-        <input type="checkbox" checked={value.autoMode} onChange={e => set('autoMode', e.target.checked)} />
-        Auto-approve mode
-        <span style={{ color: '#666', fontSize: '11px' }}>
-          {value.cli === 'claude' ? '(--dangerously-skip-permissions)' :
-           value.cli === 'openclaude' ? '(--dangerously-skip-permissions)' :
-           value.cli === 'codex' ? '(--yolo)' :
-           value.cli === 'kimi' ? '(--yolo)' :
-           value.cli === 'gemini' ? '(--yolo)' :
-           value.cli === 'copilot' ? '(--allow-all)' :
-           value.cli === 'pi' ? '(Pi has no prompts — always auto)' : '(auto-run)'}
-        </span>
-      </label>
+      <div className="cog-dialog__checks">
+        <div>
+          <Checkbox checked={value.autoMode} onChange={checked => set('autoMode', checked)}>
+            Auto-approve mode
+          </Checkbox>
+          <div className="cog-dialog__checkhint">
+            <span className="cog-mono">{autoModeFlag(value.cli)}</span>
+          </div>
+        </div>
 
-      <label style={{ ...labelStyle, flexDirection: 'row', alignItems: 'center', gap: '8px' }}>
-        <input type="checkbox" checked={value.admin} onChange={e => set('admin', e.target.checked)} />
-        Run as admin
-      </label>
+        <Checkbox checked={value.admin} onChange={checked => set('admin', checked)}>
+          Run as admin
+        </Checkbox>
+      </div>
 
       <button
         type="button"
+        className="cog-disclosure cog-disclosure--inline cog-agentform__advanced"
+        aria-expanded={value.showAdvanced}
         onClick={() => set('showAdvanced', !value.showAdvanced)}
-        style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', textAlign: 'left', fontSize: '12px' }}
       >
-        {value.showAdvanced ? '\u25BC' : '\u25B6'} Advanced
+        <Icon name={value.showAdvanced ? 'chevron-down' : 'chevron-right'} size={14} />Advanced
       </button>
 
       {value.showAdvanced && (
         <>
-          <label style={labelStyle}>
-            Shell
-            <select value={value.shell} onChange={e => set('shell', e.target.value as AgentConfig['shell'])} style={inputStyle}>
-              {shellOptions.map(option => (
-                <option key={option} value={option}>
-                  {option === 'powershell' ? 'PowerShell' :
-                   option === 'cmd' ? 'Command Prompt (cmd)' :
-                   option === 'wsl' ? 'WSL (recommended for Codex on Windows)' :
-                   option === 'bash' ? 'Bash' :
-                   option === 'zsh' ? 'Zsh' : 'Fish'}
-                </option>
-              ))}
-            </select>
-            <span style={{ color: '#555', fontSize: '11px' }}>
-              {value.shell === 'wsl'
-                ? 'Runs the agent inside your default WSL distro (real Linux PTY — fixes the Codex Enter-key freeze on Windows). Requires WSL installed and codex/node available inside the distro. Windows paths like C:\\… are auto-translated to /mnt/c/…'
-                : isWindows ? 'Use cmd if a CLI is not found in PowerShell' : 'Pick the shell that matches your local CLI setup'}
-            </span>
-          </label>
-          <label style={labelStyle}>
-            Prompt Regex Override
-            <input value={value.promptRegex} onChange={e => set('promptRegex', e.target.value)} style={inputStyle} placeholder="[>❯]\\s*$" />
-          </label>
+          <Field
+            label="Shell"
+            help={value.shell === 'wsl'
+              ? 'Runs the agent inside your default WSL distro (real Linux PTY — fixes the Codex Enter-key freeze on Windows). Requires WSL installed and codex/node available inside the distro. Windows paths like C:\\… are auto-translated to /mnt/c/…'
+              : isWindows ? 'Use cmd if a CLI is not found in PowerShell' : 'Pick the shell that matches your local CLI setup'}
+          >
+            <Select
+              value={value.shell}
+              onChange={v => set('shell', v)}
+              options={shellOptions.map(option => ({ value: option, label: shellLabel(option) }))}
+            />
+          </Field>
+          <Field label="Prompt regex override">
+            <Input mono value={value.promptRegex} onChange={e => set('promptRegex', e.target.value)} placeholder="[>❯]\\s*$" />
+          </Field>
         </>
       )}
 
@@ -519,16 +468,22 @@ export function AgentConfigForm({ value, onChange, errors, hideSpawnAsleep }: Ag
   )
 }
 
-const errorStyle: React.CSSProperties = {
-  color: '#e55', fontSize: '11px', marginTop: '2px'
+/** Display label for a shell option in the Advanced section. */
+export function shellLabel(option: AgentConfig['shell']): string {
+  return option === 'powershell' ? 'PowerShell' :
+    option === 'cmd' ? 'Command Prompt (cmd)' :
+    option === 'wsl' ? 'WSL (recommended for Codex on Windows)' :
+    option === 'bash' ? 'Bash' :
+    option === 'zsh' ? 'Zsh' : 'Fish'
 }
 
-const labelStyle: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', gap: '4px',
-  fontSize: '12px', color: '#aaa'
-}
-
-const inputStyle: React.CSSProperties = {
-  backgroundColor: '#2a2a2a', border: '1px solid #444', borderRadius: '4px',
-  padding: '8px', color: '#e0e0e0', fontSize: '13px', fontFamily: 'inherit'
+/** The auto-approve flag shown beside the checkbox, per CLI. */
+export function autoModeFlag(cli: string): string {
+  return cli === 'claude' ? '(--dangerously-skip-permissions)' :
+    cli === 'openclaude' ? '(--dangerously-skip-permissions)' :
+    cli === 'codex' ? '(--yolo)' :
+    cli === 'kimi' ? '(--yolo)' :
+    cli === 'gemini' ? '(--yolo)' :
+    cli === 'copilot' ? '(--allow-all)' :
+    cli === 'pi' ? '(Pi has no prompts — always auto)' : '(auto-run)'
 }
