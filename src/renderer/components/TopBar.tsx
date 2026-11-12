@@ -1,17 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { AgentPill } from './AgentPill'
 import { TabBar } from './TabBar'
 import type { AgentState, KilledAgentSummary } from '../../shared/types'
 import { formatKilledAt } from '../killed-agents'
 import type { ViewMode } from '../mosaic-store'
-import { Button, Icon } from '../ui'
-
-const STATUS_COLORS: Record<string, string> = {
-  idle: '#888',
-  active: '#4caf50',
-  working: '#ffc107',
-  disconnected: '#f44336'
-}
+import { Button, CogMark, Icon, Menu, MenuItem, MenuSeparator, Segmented, StatusChip, type IconName } from '../ui'
+import { topbarLabels } from '../topbar-layout'
 
 interface TopBarProps {
   projectName: string | null
@@ -67,62 +60,17 @@ interface TopBarProps {
   onToggleAppearance: () => void
 }
 
-function DropdownMenu({ items, onClose, style }: {
-  items: Array<{ label: string; onClick: () => void; color?: string; divider?: boolean }>
-  onClose: () => void
-  style?: React.CSSProperties
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-
+function useWindowWidth(): number {
+  const [width, setWidth] = useState(() => window.innerWidth)
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [onClose])
-
-  return (
-    <div ref={ref} style={{
-      position: 'absolute',
-      top: '100%',
-      left: 0,
-      marginTop: '4px',
-      backgroundColor: '#252525',
-      border: '1px solid #444',
-      borderRadius: '6px',
-      padding: '4px 0',
-      minWidth: '160px',
-      zIndex: 100000,
-      boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-      ...style
-    }}>
-      {items.map((item, i) => (
-        <React.Fragment key={i}>
-          {item.divider && <div style={{ height: '1px', backgroundColor: '#333', margin: '4px 0' }} />}
-          <button
-            onClick={() => { item.onClick(); onClose() }}
-            style={{
-              display: 'block',
-              width: '100%',
-              padding: '6px 14px',
-              background: 'none',
-              border: 'none',
-              color: item.color || '#ccc',
-              fontSize: '12px',
-              cursor: 'pointer',
-              textAlign: 'left',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#333')}
-            onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-          >
-            {item.label}
-          </button>
-        </React.Fragment>
-      ))}
-    </div>
-  )
+    const onResize = () => setWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+  return width
 }
+
+const BAR_ICON = 15
 
 export function TopBar({
   projectName, onSwitchProject, agents, onSpawnClick, onAgentClick,
@@ -135,7 +83,7 @@ export function TopBar({
   trollboxOpen, onToggleTrollbox,
   inboxOpen, onToggleInbox, inboxUnreadCount,
   onPresetsClick, onBugReport, onSettingsClick, onHelpMcpToolsClick,
-  groups, onLinkDragStart, linkDraggingFrom,
+  groups,
   tabs, activeTabId, onSwitchTab, onCreateTab, onCloseTab, onRenameTab,
   boardOpen, onToggleBoard,
   viewMode, onToggleViewMode,
@@ -145,254 +93,228 @@ export function TopBar({
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null)
   const [panelMenu, setPanelMenu] = useState(false)
   const [helpMenu, setHelpMenu] = useState(false)
+  const agentsBtn = useRef<HTMLButtonElement>(null)
+  const panelsBtn = useRef<HTMLButtonElement>(null)
+  const helpBtn = useRef<HTMLButtonElement>(null)
+  const labels = topbarLabels(useWindowWidth())
 
   const closeAgentMenu = () => { setAgentMenuOpen(false); setExpandedAgent(null) }
 
-  const btnStyle: React.CSSProperties = {
-    height: '28px',
-    padding: '0 10px',
-    borderRadius: '5px',
-    border: '1px solid #444',
-    backgroundColor: '#2a2a2a',
-    color: '#999',
-    fontSize: '12px',
-    cursor: 'pointer',
-    whiteSpace: 'nowrap'
-  }
-
-  const menuItemStyle: React.CSSProperties = {
-    display: 'block', width: '100%', padding: '5px 14px', background: 'none',
-    border: 'none', color: '#ccc', fontSize: '11px', cursor: 'pointer', textAlign: 'left',
-  }
-  const hoverIn = (e: React.MouseEvent) => (e.currentTarget.style.backgroundColor = '#333')
-  const hoverOut = (e: React.MouseEvent) => (e.currentTarget.style.backgroundColor = 'transparent')
-  const killedBtnStyle: React.CSSProperties = {
-    background: 'none', border: '1px solid', borderRadius: '4px', padding: '2px 6px',
-    fontSize: '10px', cursor: 'pointer', flexShrink: 0
-  }
-
   const activePanelCount = [pinboardOpen, infoOpen, filesOpen, racOpen, usageOpen, gitOpen, schedulesOpen, trollboxOpen, inboxOpen, boardOpen].filter(Boolean).length
 
+  const panelRows: Array<{ label: string; icon: IconName; open: boolean; onClick: () => void; badge?: number; divider?: boolean }> = [
+    { label: 'Git', icon: 'git-branch', open: gitOpen, onClick: onToggleGit },
+    { label: 'Files', icon: 'file-text', open: filesOpen, onClick: onToggleFiles },
+    { label: 'Pinboard', icon: 'pin', open: pinboardOpen, onClick: onTogglePinboard },
+    { label: 'Info Channel', icon: 'radio', open: infoOpen, onClick: onToggleInfo },
+    { label: 'Usage', icon: 'gauge', open: usageOpen, onClick: onToggleUsage },
+    { label: 'R.A.C.', icon: 'messages-square', open: racOpen, onClick: onToggleRac },
+    { label: 'Schedules', icon: 'calendar-clock', open: schedulesOpen, onClick: onToggleSchedules, divider: true },
+    { label: 'Trollbox', icon: 'popcorn', open: trollboxOpen, onClick: onToggleTrollbox },
+    { label: 'Inbox', icon: 'inbox', open: inboxOpen, onClick: onToggleInbox, badge: inboxUnreadCount },
+    { label: 'Sketchpad', icon: 'book-open', open: !!boardOpen, onClick: onToggleBoard ?? (() => {}) }
+  ]
+
+  // Icon-only controls keep their word as tooltip and accessible name.
+  const named = (word: string, shown: boolean) => (shown ? {} : { 'aria-label': word, title: word })
+
   return (
-    <div style={{
-      height: '44px',
-      backgroundColor: '#1a1a1a',
-      borderBottom: '1px solid #2a2a2a',
-      display: 'flex',
-      alignItems: 'center',
-      padding: '0 12px',
-      gap: '6px',
-      flexShrink: 0
-    }}>
-      {/* Project name */}
-      {projectName && (
-        <button onClick={onSwitchProject} title="Switch Project" style={{
-          ...btnStyle, border: '1px solid #333', backgroundColor: 'transparent', color: '#aaa',
-          maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis'
-        }}>
-          {projectName}
-        </button>
-      )}
-      {projectName && <div style={{ width: '1px', height: '24px', backgroundColor: '#333' }} />}
+    <header className="cog-topbar">
+      {/* Left: mark, project, workspace tabs */}
+      <div className="cog-topbar__group cog-topbar__left">
+        <div className="cog-topbar__mark">
+          <CogMark size={20} />
+          <h1>Cog</h1>
+        </div>
+        <span className="cog-topbar__sep" aria-hidden="true" />
+        {projectName && (
+          <Button variant="ghost" className="cog-topbar__project" onClick={onSwitchProject} title="Switch Project">
+            <Icon name="folder" size={BAR_ICON} />
+            <span>{projectName}</span>
+          </Button>
+        )}
+        {projectName && <span className="cog-topbar__sep" aria-hidden="true" />}
+        <TabBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSwitchTab={onSwitchTab}
+          onCreateTab={onCreateTab}
+          onCloseTab={onCloseTab}
+          onRenameTab={onRenameTab}
+        />
+      </div>
 
-      {/* Workspace tabs */}
-      <TabBar
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onSwitchTab={onSwitchTab}
-        onCreateTab={onCreateTab}
-        onCloseTab={onCloseTab}
-        onRenameTab={onRenameTab}
-      />
+      {/* Middle: spawn, agents, view */}
+      <div className="cog-topbar__group cog-topbar__mid">
+        <Button variant="hint" onClick={onSpawnClick}>
+          <Icon name="plus" size={BAR_ICON} />
+          Spawn agent
+        </Button>
 
-      <div style={{ width: '1px', height: '24px', backgroundColor: '#333' }} />
-
-      {/* Spawn button */}
-      <button onClick={onSpawnClick} style={{
-        width: '30px', height: '30px', borderRadius: '6px', border: '1px solid #444',
-        backgroundColor: '#2a2a2a', color: '#4caf50', fontSize: '18px', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center'
-      }}>+</button>
-
-      {/* Agents dropdown */}
-      <div style={{ position: 'relative' }}>
-        <button onClick={() => { const next = !agentMenuOpen; setAgentMenuOpen(next); setExpandedAgent(null); if (next) onAgentMenuOpen() }} style={{
-          ...btnStyle,
-          border: agents.length > 0 ? '1px solid #4caf50' : '1px solid #444',
-          color: agents.length > 0 ? '#4caf50' : '#999',
-        }}>
-          Agents {agents.length > 0 && `(${agents.length})`}
-        </button>
-        {agentMenuOpen && (
-          <div style={{
-            position: 'absolute', top: '100%', left: 0, marginTop: '4px',
-            backgroundColor: '#252525', border: '1px solid #444', borderRadius: '6px',
-            padding: '4px 0', minWidth: '220px', zIndex: 100000,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.4)', maxHeight: '400px', overflow: 'auto'
-          }}>
-            {agents.length === 0 && (
-              <div style={{ padding: '8px 14px', color: '#555', fontSize: '12px' }}>No agents running</div>
-            )}
+        <div className="cog-menu-wrap">
+          <Button
+            ref={agentsBtn}
+            className="cog-topbar__counted"
+            aria-haspopup="menu"
+            aria-expanded={agentMenuOpen}
+            aria-label={`Agents, ${agents.length} running`}
+            onClick={() => { const next = !agentMenuOpen; setAgentMenuOpen(next); setExpandedAgent(null); if (next) onAgentMenuOpen() }}
+          >
+            <Icon name="bot" size={BAR_ICON} />
+            <span>Agents</span>
+            <span className="cog-count" aria-hidden="true">{agents.length}</span>
+          </Button>
+          {/* Stays open on outside presses, as before: a link can be dragged onto a row. */}
+          <Menu open={agentMenuOpen} onClose={closeAgentMenu} anchorRef={agentsBtn} label="Agents" closeOnOutside={false} className="cog-menu--agents">
+            {agents.length === 0 && <div className="cog-menu__note">No agents running</div>}
             {agents.map(agent => {
               const groupColor = groups.find(g => g.members.includes(agent.name))?.color
               const expanded = expandedAgent === agent.id
               return (
                 <div key={agent.id} data-agent-name={agent.name}>
                   <button
+                    type="button"
+                    role="menuitem"
+                    aria-expanded={expanded}
+                    className="cog-menu__item"
                     onClick={() => setExpandedAgent(expanded ? null : agent.id)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
-                      padding: '6px 14px', background: 'none', border: 'none',
-                      color: '#ccc', fontSize: '12px', cursor: 'pointer', textAlign: 'left',
-                    }}
-                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#333')}
-                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
                   >
-                    <span style={{
-                      width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                      backgroundColor: STATUS_COLORS[agent.status] ?? '#888',
-                      border: groupColor ? `2px solid ${groupColor}` : 'none'
-                    }} />
-                    <span style={{ flex: 1 }}>{agent.name}</span>
-                    <span style={{ color: '#666', fontSize: '10px' }}>{agent.role}</span>
-                    <span style={{ color: '#555', fontSize: '10px' }}>{expanded ? '\u25B2' : '\u25BC'}</span>
+                    <StatusChip status={agent.status} />
+                    {groupColor && <span className="cog-menu__swatch" style={{ background: groupColor }} title="Link group" />}
+                    <span className="cog-menu__name">{agent.name}</span>
+                    <span className="cog-menu__role">{agent.role}</span>
+                    <span className="cog-menu__chev" aria-hidden="true"><Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} /></span>
                   </button>
                   {expanded && (
-                    <div style={{ borderTop: '1px solid #333', borderBottom: '1px solid #333', backgroundColor: '#1e1e1e' }}>
-                      <button onClick={() => { onAgentClick(agent.id); closeAgentMenu() }}
-                        style={menuItemStyle} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-                        Focus Window
-                      </button>
-                      <button onClick={() => { onClearContext(agent.id); closeAgentMenu() }}
-                        style={menuItemStyle} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-                        Clear Context
-                      </button>
-                      <button onClick={() => { onDisconnectAgent(agent.name); closeAgentMenu() }}
-                        style={menuItemStyle} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-                        Disconnect Links
-                      </button>
-                      <button onClick={() => { onKillAgent(agent.id); closeAgentMenu() }}
-                        style={{ ...menuItemStyle, color: '#f44336' }} onMouseEnter={hoverIn} onMouseLeave={hoverOut}>
-                        Kill Agent
-                      </button>
+                    <div className="cog-menu__actions">
+                      <Button variant="ghost" role="menuitem" onClick={() => { onAgentClick(agent.id); closeAgentMenu() }}>
+                        <Icon name="crosshair" size={14} />Focus window
+                      </Button>
+                      <Button variant="ghost" role="menuitem" onClick={() => { onClearContext(agent.id); closeAgentMenu() }}>
+                        <Icon name="eraser" size={14} />Clear context
+                      </Button>
+                      <Button variant="ghost" role="menuitem" onClick={() => { onDisconnectAgent(agent.name); closeAgentMenu() }}>
+                        <Icon name="unplug" size={14} />Disconnect links
+                      </Button>
+                      <Button variant="ghost" role="menuitem" className="cog-tone-danger" onClick={() => { onKillAgent(agent.id); closeAgentMenu() }}>
+                        <Icon name="circle-x" size={14} />Kill agent
+                      </Button>
                     </div>
                   )}
                 </div>
               )
             })}
             {killedAgents.length > 0 && (
-              <div data-killed-list style={{ borderTop: '1px solid #333', marginTop: '4px', paddingTop: '4px' }}>
-                <div style={{ padding: '4px 14px', color: '#777', fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Killed ({killedAgents.length})
-                </div>
+              <div data-killed-list>
+                <MenuSeparator />
+                <div className="cog-menu__heading">Killed · {killedAgents.length}</div>
                 {killedAgents.map(k => (
-                  <div key={k.id} data-killed-agent={k.name} style={{
-                    display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 14px', fontSize: '12px', color: '#999'
-                  }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#555', flexShrink: 0 }} />
-                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                      title={`${k.role} \u00b7 ${k.cli} \u00b7 killed ${new Date(k.killedAt).toLocaleString()}${k.resumable ? ' \u00b7 session resumes on restore' : ''}`}>
+                  <div key={k.id} data-killed-agent={k.name} className="cog-killed">
+                    <span className="cog-killed__name"
+                      title={`${k.role} · ${k.cli} · killed ${new Date(k.killedAt).toLocaleString()}${k.resumable ? ' · session resumes on restore' : ''}`}>
                       {k.name}
                     </span>
-                    <span style={{ color: '#666', fontSize: '10px', flexShrink: 0 }}>{formatKilledAt(k.killedAt)}</span>
-                    <button onClick={() => { onRestoreAgent(k.id); closeAgentMenu() }} title="Spawn it again; a Claude session resumes"
-                      style={{ ...killedBtnStyle, color: '#4caf50', borderColor: '#2e5c31' }}>Restore</button>
-                    <button onClick={() => onForgetKilled(k.id)} title="Remove from this list"
-                      style={{ ...killedBtnStyle, color: '#888', borderColor: '#444' }}>Forget</button>
+                    <span className="cog-killed__when">{formatKilledAt(k.killedAt)}</span>
+                    <Button variant="ghost" role="menuitem" className="cog-tone-success" onClick={() => { onRestoreAgent(k.id); closeAgentMenu() }}
+                      title="Spawn it again; a Claude session resumes">Restore</Button>
+                    <Button variant="ghost" role="menuitem" onClick={() => onForgetKilled(k.id)}
+                      title="Remove from this list">Forget</Button>
                   </div>
                 ))}
               </div>
             )}
-          </div>
-        )}
+          </Menu>
+        </div>
+
+        <span title="Toggle view (Ctrl+Shift+M)">
+          <Segmented<ViewMode>
+            ariaLabel="View mode"
+            value={viewMode}
+            onChange={mode => { if (mode !== viewMode) onToggleViewMode() }}
+            options={[
+              { value: 'canvas', label: 'Canvas', icon: 'network' },
+              { value: 'mosaic', label: 'Mosaic', icon: 'grid' }
+            ]}
+          />
+        </span>
       </div>
 
-      <div style={{ flex: 1 }} /> {/* spacer */}
+      {/* Right: panels, presets, help, bug, settings, terminal appearance */}
+      <div className="cog-topbar__group cog-topbar__right">
+        <span className="cog-topbar__sep" aria-hidden="true" />
 
-      {/* Right side controls */}
-      <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }}>
+        <div className="cog-menu-wrap">
+          <Button
+            ref={panelsBtn}
+            variant="ghost"
+            className={activePanelCount > 0 ? 'cog-topbar__counted' : undefined}
+            aria-haspopup="menu"
+            aria-expanded={panelMenu}
+            aria-label={activePanelCount > 0 ? `Panels, ${activePanelCount} open` : 'Panels'}
+            title={labels.panels ? undefined : 'Panels'}
+            onClick={() => setPanelMenu(!panelMenu)}
+          >
+            <Icon name="panels" size={BAR_ICON} />
+            {labels.panels && <span>Panels</span>}
+            {activePanelCount > 0 && <span className="cog-count" aria-hidden="true">{activePanelCount}</span>}
+          </Button>
+          <Menu open={panelMenu} onClose={() => setPanelMenu(false)} anchorRef={panelsBtn} label="Panels" align="right">
+            {panelRows.map(row => (
+              <React.Fragment key={row.label}>
+                {row.divider && <MenuSeparator />}
+                <MenuItem
+                  icon={row.icon}
+                  checked={row.open}
+                  onClick={() => { row.onClick(); setPanelMenu(false) }}
+                  trailing={row.badge ? <span className="cog-menu__badge" aria-label={`${row.badge} unread`}>{row.badge}</span> : undefined}
+                >
+                  {row.label}
+                </MenuItem>
+              </React.Fragment>
+            ))}
+          </Menu>
+        </div>
+
+        <Button variant="ghost" onClick={onPresetsClick} {...named('Presets', labels.presets)}>
+          <Icon name="bookmark" size={BAR_ICON} />
+          {labels.presets && 'Presets'}
+        </Button>
+
+        <div className="cog-menu-wrap">
+          <Button
+            ref={helpBtn}
+            variant="ghost"
+            aria-haspopup="menu"
+            aria-expanded={helpMenu}
+            onClick={() => setHelpMenu(!helpMenu)}
+            {...named('Help', labels.help)}
+          >
+            <Icon name="help" size={BAR_ICON} />
+            {labels.help && 'Help'}
+          </Button>
+          <Menu open={helpMenu} onClose={() => setHelpMenu(false)} anchorRef={helpBtn} label="Help" align="right">
+            <MenuItem icon="wrench" onClick={() => { onHelpMcpToolsClick(); setHelpMenu(false) }}>MCP Tools Reference</MenuItem>
+          </Menu>
+        </div>
+
+        <Button variant="icon" className="cog-btn--ghost" onClick={onBugReport} aria-label="Report a bug" title="Report a bug">
+          <Icon name="bug" size={BAR_ICON} />
+        </Button>
+        <Button variant="icon" className="cog-btn--ghost" onClick={onSettingsClick} aria-label="Settings" title="Settings">
+          <Icon name="settings" size={BAR_ICON} />
+        </Button>
+
         <Button
           id="appearance-toggle"
           aria-expanded={appearanceOpen}
           aria-controls="appearance-drawer"
           onClick={onToggleAppearance}
+          {...named('Terminal appearance', labels.appearance)}
         >
-          <Icon name="palette" size={14} />
-          Terminal appearance
+          <Icon name="palette" size={BAR_ICON} />
+          {labels.appearance && 'Terminal appearance'}
         </Button>
-
-        {/* Canvas | Mosaic view toggle */}
-        <div role="group" aria-label="View mode" title="Toggle view (Ctrl+Shift+M)" style={{
-          display: 'flex', height: '28px', border: '1px solid #444', borderRadius: '5px', overflow: 'hidden'
-        }}>
-          {(['canvas', 'mosaic'] as const).map(mode => {
-            const active = viewMode === mode
-            return (
-              <button
-                key={mode}
-                aria-pressed={active}
-                onClick={() => { if (!active) onToggleViewMode() }}
-                style={{
-                  padding: '0 10px', border: 'none', fontSize: '12px', cursor: active ? 'default' : 'pointer',
-                  backgroundColor: active ? '#1e3a5f' : '#2a2a2a',
-                  color: active ? '#8cc4ff' : '#999'
-                }}
-              >{mode === 'canvas' ? 'Canvas' : 'Mosaic'}</button>
-            )
-          })}
-        </div>
-
-        {/* Panels dropdown */}
-        <div style={{ position: 'relative' }}>
-          <button onClick={() => setPanelMenu(!panelMenu)} style={{
-            ...btnStyle,
-            border: activePanelCount > 0 ? '1px solid #4a9eff' : '1px solid #444',
-            color: activePanelCount > 0 ? '#8cc4ff' : '#999',
-            backgroundColor: activePanelCount > 0 ? '#1e3a5f' : '#2a2a2a',
-          }}>
-            Panels {activePanelCount > 0 && `(${activePanelCount})`}
-          </button>
-          {panelMenu && (
-            <DropdownMenu
-              onClose={() => setPanelMenu(false)}
-              style={{ right: 0, left: 'auto' }}
-              items={[
-                { label: `${gitOpen ? '\u25CF ' : '  '}Git`, onClick: onToggleGit, color: gitOpen ? '#8cc4ff' : '#888' },
-                { label: `${filesOpen ? '\u25CF ' : '  '}Files`, onClick: onToggleFiles, color: filesOpen ? '#8cc4ff' : '#888' },
-                { label: `${pinboardOpen ? '\u25CF ' : '  '}Pinboard`, onClick: onTogglePinboard, color: pinboardOpen ? '#8cc4ff' : '#888' },
-                { label: `${infoOpen ? '\u25CF ' : '  '}Info Channel`, onClick: onToggleInfo, color: infoOpen ? '#8cc4ff' : '#888' },
-                { label: `${usageOpen ? '\u25CF ' : '  '}Usage`, onClick: onToggleUsage, color: usageOpen ? '#8cc4ff' : '#888' },
-                { label: `${racOpen ? '\u25CF ' : '  '}R.A.C.`, onClick: onToggleRac, color: racOpen ? '#8cc4ff' : '#888', divider: true },
-                { label: `${schedulesOpen ? '\u25CF ' : '  '}Schedules`, onClick: onToggleSchedules, color: schedulesOpen ? '#8cc4ff' : '#888' },
-                { label: `${trollboxOpen ? '\u25CF ' : '  '}\uD83C\uDF7F Trollbox`, onClick: onToggleTrollbox, color: trollboxOpen ? '#8cc4ff' : '#888' },
-                { label: `${inboxOpen ? '\u25CF ' : '  '}\uD83D\uDCEC Inbox${inboxUnreadCount > 0 ? ` (${inboxUnreadCount})` : ''}`, onClick: onToggleInbox, color: inboxUnreadCount > 0 ? '#f5a25a' : (inboxOpen ? '#8cc4ff' : '#888') },
-                { label: `${boardOpen ? '● ' : '  '}📖 Sketchpad`, onClick: onToggleBoard ?? (() => {}), color: boardOpen ? '#8cc4ff' : '#888' },
-              ]}
-            />
-          )}
-        </div>
-
-        <button onClick={onPresetsClick} style={btnStyle}>Presets</button>
-
-        {/* Help dropdown */}
-        <div style={{ position: 'relative' }}>
-          <button onClick={() => setHelpMenu(!helpMenu)} style={btnStyle}>Help</button>
-          {helpMenu && (
-            <DropdownMenu
-              onClose={() => setHelpMenu(false)}
-              style={{ right: 0, left: 'auto' }}
-              items={[
-                { label: 'MCP Tools Reference', onClick: onHelpMcpToolsClick },
-              ]}
-            />
-          )}
-        </div>
-
-        <div style={{ width: '1px', height: '24px', backgroundColor: '#333' }} />
-
-        <button onClick={onBugReport} style={{ ...btnStyle, color: '#f44336', fontSize: '11px' }}>Bug?</button>
-        <button onClick={onSettingsClick} style={{ ...btnStyle, color: '#888', fontSize: '14px' }}>{'\u2699'}</button>
       </div>
-    </div>
+    </header>
   )
 }

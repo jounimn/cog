@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Button, Icon } from '../ui'
 
 interface Tab {
   id: string
@@ -32,67 +33,67 @@ export function TabBar({ tabs, activeTabId, onSwitchTab, onCreateTab, onCloseTab
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-      {tabs.map(tab => (
-        <div
-          key={tab.id}
-          onClick={() => onSwitchTab(tab.id)}
-          title={tab.projectPath ? `📁 ${tab.projectPath}` : `${tab.name} — double-click to rename; use + to add a folder-bound workspace`}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '4px 10px',
-            backgroundColor: tab.id === activeTabId ? '#333' : 'transparent',
-            border: tab.id === activeTabId ? '1px solid #555' : '1px solid transparent',
-            borderRadius: '4px 4px 0 0',
-            cursor: 'pointer',
-            fontSize: '11px',
-            color: tab.id === activeTabId ? '#e0e0e0' : '#888',
-            whiteSpace: 'nowrap',
-            maxWidth: '140px',
-          }}
-        >
-          {editingId === tab.id ? (
-            <input
-              value={editName}
-              onChange={e => setEditName(e.target.value)}
-              onBlur={confirmRename}
-              onKeyDown={e => { if (e.key === 'Enter') confirmRename(); if (e.key === 'Escape') setEditingId(null) }}
-              onClick={e => e.stopPropagation()}
-              autoFocus
-              style={{
-                width: '80px', backgroundColor: '#2a2a2a', border: '1px solid #4a9eff',
-                borderRadius: '2px', padding: '1px 4px', color: '#e0e0e0', fontSize: '11px',
-                outline: 'none'
-              }}
-            />
-          ) : (
-            <span
-              onDoubleClick={(e) => { e.stopPropagation(); startRename(tab) }}
-              style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}
-            >
-              {tab.projectPath ? '📁 ' : ''}{tab.name}
-            </span>
-          )}
-          {tabs.length > 1 && (
-            <span
-              onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id) }}
-              style={{ color: '#666', fontSize: '12px', cursor: 'pointer', marginLeft: '2px' }}
-            >x</span>
-          )}
-        </div>
-      ))}
-      <button
+    <div className="cog-tabs" role="tablist" aria-label="Workspaces">
+      {tabs.map(tab => {
+        const active = tab.id === activeTabId
+        return (
+          <div
+            key={tab.id}
+            role="tab"
+            aria-selected={active}
+            tabIndex={active ? 0 : -1}
+            className="cog-tab"
+            onClick={() => onSwitchTab(tab.id)}
+            onKeyDown={e => {
+              if (e.target !== e.currentTarget) return
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSwitchTab(tab.id) }
+            }}
+            title={tab.projectPath ? `Folder: ${tab.projectPath}` : `${tab.name} — double-click to rename; use + to add a folder-bound workspace`}
+          >
+            {tab.projectPath && <Icon name="folder" size={14} />}
+            {editingId === tab.id ? (
+              <input
+                className="cog-tab__input"
+                aria-label="Workspace name"
+                value={editName}
+                onChange={e => setEditName(e.target.value)}
+                onBlur={confirmRename}
+                onKeyDown={e => { if (e.key === 'Enter') confirmRename(); if (e.key === 'Escape') setEditingId(null) }}
+                onClick={e => e.stopPropagation()}
+                autoFocus
+              />
+            ) : (
+              <span
+                className="cog-tab__name"
+                onDoubleClick={(e) => { e.stopPropagation(); startRename(tab) }}
+              >
+                {tab.name}
+              </span>
+            )}
+            {tabs.length > 1 && (
+              <button
+                type="button"
+                className="cog-tab__close"
+                tabIndex={-1}
+                aria-label={`Close ${tab.name}`}
+                title="Close workspace"
+                onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id) }}
+              >
+                <Icon name="x" size={12} />
+              </button>
+            )}
+          </div>
+        )
+      })}
+      <Button
+        variant="icon"
+        className="cog-btn--ghost"
         onClick={onCreateTab}
+        aria-label="New workspace"
         title="New workspace — pick a project folder for its team"
-        style={{
-          width: '22px', height: '22px', borderRadius: '4px',
-          border: '1px solid #444', backgroundColor: 'transparent',
-          color: '#888', fontSize: '14px', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }}
-      >+</button>
+      >
+        <Icon name="plus" size={15} />
+      </Button>
     </div>
   )
 }
