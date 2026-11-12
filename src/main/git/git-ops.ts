@@ -1,9 +1,11 @@
 import { execSync } from 'child_process'
 import type { GitStatus, GitFileStatus, GitLogEntry } from '../../shared/types'
 
-function run(cmd: string, cwd: string): string {
+function run(cmd: string, cwd: string, keepLeading = false): string {
   try {
-    return execSync(cmd, { cwd, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }).trim()
+    const out = execSync(cmd, { cwd, encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] })
+    // Porcelain status lines start with a meaningful space (" M file" = unstaged): never trim the front.
+    return keepLeading ? out.trimEnd() : out.trim()
   } catch {
     return ''
   }
@@ -50,7 +52,7 @@ export function getStatus(cwd: string): GitStatus {
     behind = parseInt(parts[1]) || 0
   }
 
-  const statusOutput = run('git status --porcelain', cwd)
+  const statusOutput = run('git status --porcelain', cwd, true)
   const staged: GitFileStatus[] = []
   const unstaged: GitFileStatus[] = []
 
