@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import Editor from '@monaco-editor/react'
+import { defineCogTheme } from '../monaco-setup'
 import { Button, Icon, EmptyState, SectionHeader } from '../ui'
 
 interface FileEntry {
@@ -198,7 +199,8 @@ export function FilePanel(): React.ReactElement {
             language={getLanguage(activeFile.name)}
             value={activeFile.content}
             onChange={handleEditorChange}
-            theme="vs-dark"
+            theme="cog"
+            beforeMount={defineCogTheme}
             options={{
               minimap: { enabled: false },
               fontSize: 13,
