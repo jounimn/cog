@@ -11,10 +11,13 @@ interface ZoomControlsProps {
   onFitAll: () => void
 }
 
+/** Fit and 1:1 sit in the bar without frames of their own, as in the audition's .zoombar. */
+const borderless: React.CSSProperties = { borderColor: 'transparent' }
+
 const num = (n: number): string => String(n).replace('-', '−')
 
 export function ZoomControls({ zoom, range, onZoomIn, onZoomOut, onReset, onFitAll }: ZoomControlsProps): React.ReactElement {
-  const sep = <span aria-hidden="true" style={{ width: 1, height: 18, margin: '0 3px', background: c('line') }} />
+  const sep = <span aria-hidden="true" style={{ width: 1, height: 22, margin: '0 3px', flex: 'none', background: c('line') }} />
   return (
     <div
       role="toolbar"
@@ -35,8 +38,8 @@ export function ZoomControls({ zoom, range, onZoomIn, onZoomOut, onReset, onFitA
       </output>
       <Button variant="icon" onClick={onZoomIn} aria-label="Zoom in" title="Zoom in"><Icon name="plus" /></Button>
       {sep}
-      <Button onClick={onFitAll} title="Fit all (Ctrl+Shift+0)"><Icon name="scan" size={14} />Fit</Button>
-      <Button onClick={onReset} title="Reset zoom (Ctrl+0)">1:1</Button>
+      <Button onClick={onFitAll} title="Fit all (Ctrl+Shift+0)" style={borderless}><Icon name="scan" size={14} />Fit</Button>
+      <Button onClick={onReset} title="Reset zoom (Ctrl+0)" style={borderless}>1:1</Button>
       {sep}
       <span
         aria-label="Visible range"

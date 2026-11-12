@@ -75,7 +75,15 @@ export const Rulers = React.memo(function Rulers({ zoom, pan, width, height }: R
           </span>
         ))}
       </div>
-      <div style={{ position: 'absolute', left: 0, top: 0, width: RULER_Y_WIDTH, height: RULER_X_HEIGHT, borderRight: edge, borderBottom: edge, opacity: 0.7 }} />
+      <div
+        style={{
+          position: 'absolute', left: 0, top: 0, width: RULER_Y_WIDTH, height: RULER_X_HEIGHT,
+          boxSizing: 'border-box', borderRight: edge, borderBottom: edge, opacity: 0.7,
+          display: 'grid', placeItems: 'center', font: `500 9px/1 ${font.mono}`, color: c('ink-subtle')
+        }}
+      >
+        px
+      </div>
     </div>
   )
 })

@@ -3,7 +3,8 @@ import { Icon, type IconName } from './Icon'
 
 export interface SegmentedOption<T extends string> {
   value: T
-  label: string
+  /** Usually text; a node lets a caller mark a part that may truncate. */
+  label: React.ReactNode
   icon?: IconName
   disabled?: boolean
 }

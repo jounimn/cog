@@ -64,7 +64,7 @@ export function AppearanceDrawer({ open, onClose, focusedAgent }: AppearanceDraw
       <div className="cog-drawer__head">
         <Icon name="palette" size={16} />
         <h2 id="appearance-drawer-title">Terminal appearance</h2>
-        <Button ref={closeRef} variant="icon" aria-label="Close Terminal appearance" title="Close" onClick={onClose}>
+        <Button ref={closeRef} variant="icon" style={{ borderColor: 'transparent' }} aria-label="Close Terminal appearance" title="Close" onClick={onClose}>
           <Icon name="x" size={16} />
         </Button>
       </div>
@@ -77,7 +77,13 @@ export function AppearanceDrawer({ open, onClose, focusedAgent }: AppearanceDraw
           onChange={setScope}
           options={[
             { value: 'all', label: 'All terminals' },
-            { value: 'one', label: name ? `This terminal: ${name}` : 'This terminal', disabled: !name }
+            {
+              value: 'one',
+              label: name
+                ? <><span style={{ flex: 'none' }}>{'This terminal: '}</span><span className="cog-seg__trunc">{name}</span></>
+                : 'This terminal',
+              disabled: !name
+            }
           ]}
         />
       </div>
