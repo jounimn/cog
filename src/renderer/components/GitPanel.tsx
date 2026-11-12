@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import type { GitStatus, GitFileStatus, GitLogEntry } from '../../shared/types'
+import {
+  Button, Icon, Segmented, Menu, MenuItem, Input, Textarea, EmptyState, Loading, Row, Toolbar, SectionHeader
+} from '../ui'
+import { diffLineKind, fileStatusPresentation, splitPath } from '../git-present'
 
 interface WorktreeRow { slug: string; path: string; branch: string | null; dirty: boolean; agentName: string | null }
 
@@ -19,51 +23,14 @@ declare const electronAPI: {
   worktreeRemove: (slug: string, force: boolean) => Promise<{ removed: boolean; detail?: string }>
 }
 
-const STATUS_COLORS: Record<GitFileStatus['status'], string> = {
-  added: '#4caf50',
-  modified: '#ffc107',
-  deleted: '#f44336',
-  renamed: '#42a5f5',
-}
-
-const STATUS_LABELS: Record<GitFileStatus['status'], string> = {
-  added: 'A',
-  modified: 'M',
-  deleted: 'D',
-  renamed: 'R',
-}
-
 // ── Diff viewer ─────────────────────────────────────────────
 function DiffViewer({ diff }: { diff: string }): React.ReactElement {
   return (
-    <pre style={{
-      margin: 0,
-      padding: '8px 12px',
-      fontSize: '12px',
-      fontFamily: 'Consolas, "Courier New", monospace',
-      lineHeight: '1.5',
-      overflow: 'auto',
-      backgroundColor: '#1a1a1a',
-      color: '#ccc',
-      whiteSpace: 'pre',
-      tabSize: 4,
-    }}>
+    <pre className="cog-diff">
       {diff.split('\n').map((line, i) => {
-        let color = '#ccc'
-        let bg = 'transparent'
-        if (line.startsWith('+') && !line.startsWith('+++')) {
-          color = '#4caf50'
-          bg = 'rgba(76,175,80,0.08)'
-        } else if (line.startsWith('-') && !line.startsWith('---')) {
-          color = '#f44336'
-          bg = 'rgba(244,67,54,0.08)'
-        } else if (line.startsWith('@@')) {
-          color = '#42a5f5'
-        } else if (line.startsWith('diff ') || line.startsWith('index ')) {
-          color = '#888'
-        }
+        const kind = diffLineKind(line)
         return (
-          <div key={i} style={{ color, backgroundColor: bg, minHeight: '18px' }}>
+          <div key={i} className={kind === 'ctx' ? undefined : `cog-diff__${kind}`}>
             {line}
           </div>
         )
@@ -73,104 +40,44 @@ function DiffViewer({ diff }: { diff: string }): React.ReactElement {
 }
 
 // ── File list item ──────────────────────────────────────────
-function FileItem({ file, action, actionLabel, onAction, onClick, selected }: {
+function FileItem({ file, actionLabel, actionIcon, onAction, onClick, selected }: {
   file: GitFileStatus
-  action: () => void
   actionLabel: string
+  actionIcon: 'plus' | 'minus'
   onAction: () => void
   onClick: () => void
   selected: boolean
 }): React.ReactElement {
-  const shortPath = file.path.split('/').pop() || file.path
+  const { name, dir } = splitPath(file.path)
+  const st = fileStatusPresentation(file.status)
   return (
-    <div
+    <Row
       onClick={onClick}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        padding: '2px 8px',
-        fontSize: '12px',
-        cursor: 'pointer',
-        backgroundColor: selected ? '#2a2d2e' : 'transparent',
-        gap: '6px',
-      }}
-      title={file.path}
-      onMouseEnter={e => { if (!selected) e.currentTarget.style.backgroundColor = '#252525' }}
-      onMouseLeave={e => { if (!selected) e.currentTarget.style.backgroundColor = 'transparent' }}
-    >
-      <span style={{
-        color: STATUS_COLORS[file.status],
-        fontWeight: 600,
-        fontSize: '11px',
-        width: '14px',
-        textAlign: 'center',
-        flexShrink: 0,
-      }}>
-        {STATUS_LABELS[file.status]}
-      </span>
-      <span style={{
-        flex: 1,
-        color: '#ccc',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>
-        {shortPath}
-        <span style={{ color: '#666', marginLeft: '4px', fontSize: '11px' }}>
-          {file.path !== shortPath ? file.path.replace(/\/[^/]+$/, '') : ''}
+      selected={selected}
+      tooltip={file.path}
+      icon={
+        <span className={`cog-git__letter cog-tone-${st.tone}`} title={st.label} aria-label={st.label}>
+          {st.letter}
         </span>
-      </span>
-      <span
-        onClick={e => { e.stopPropagation(); onAction() }}
-        style={{
-          width: '20px',
-          height: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: '3px',
-          fontSize: '14px',
-          color: '#888',
-          cursor: 'pointer',
-          flexShrink: 0,
-        }}
-        title={actionLabel}
-        onMouseEnter={e => (e.currentTarget.style.color = '#e0e0e0')}
-        onMouseLeave={e => (e.currentTarget.style.color = '#888')}
-      >
-        {action === onAction ? actionLabel : actionLabel}
-      </span>
-    </div>
-  )
-}
-
-// ── Small button ────────────────────────────────────────────
-function Btn({ label, onClick, disabled, loading, small, style: extraStyle }: {
-  label: string
-  onClick: () => void
-  disabled?: boolean
-  loading?: boolean
-  small?: boolean
-  style?: React.CSSProperties
-}): React.ReactElement {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled || loading}
-      style={{
-        padding: small ? '2px 8px' : '4px 10px',
-        fontSize: small ? '11px' : '12px',
-        backgroundColor: disabled || loading ? '#333' : '#3c3c3c',
-        color: disabled || loading ? '#666' : '#ccc',
-        border: '1px solid #555',
-        borderRadius: '3px',
-        cursor: disabled || loading ? 'default' : 'pointer',
-        whiteSpace: 'nowrap',
-        ...extraStyle,
-      }}
-    >
-      {loading ? '...' : label}
-    </button>
+      }
+      title={
+        <span className="cog-git__file">
+          {name}
+          {dir && <span className="cog-git__dir">{dir}</span>}
+        </span>
+      }
+      actions={
+        <Button
+          variant="icon"
+          className="cog-btn--ghost"
+          onClick={onAction}
+          title={actionLabel}
+          aria-label={`${actionLabel} ${file.path}`}
+        >
+          <Icon name={actionIcon} size={14} />
+        </Button>
+      }
+    />
   )
 }
 
@@ -191,6 +98,7 @@ export function GitPanel(): React.ReactElement {
   const [showNewBranch, setShowNewBranch] = useState(false)
 
   const branchDropdownRef = useRef<HTMLDivElement>(null)
+  const branchButtonRef = useRef<HTMLButtonElement>(null)
 
   const [worktrees, setWorktrees] = useState<WorktreeRow[]>([])
 
@@ -416,16 +324,10 @@ export function GitPanel(): React.ReactElement {
   // ── Not a repo ────────────────────────────────────────────
   if (status && !status.isRepo) {
     return (
-      <div style={{
-        height: '100%',
-        backgroundColor: '#1e1e1e',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#666',
-        fontSize: '13px',
-      }}>
-        Not a git repository
+      <div className="cog-panel">
+        <EmptyState icon="git-branch">
+          This project is not a git repository. Changes, history and branches appear here once it is one.
+        </EmptyState>
       </div>
     )
   }
@@ -433,269 +335,213 @@ export function GitPanel(): React.ReactElement {
   // ── Loading initial status ────────────────────────────────
   if (!status) {
     return (
-      <div style={{
-        height: '100%',
-        backgroundColor: '#1e1e1e',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#666',
-        fontSize: '13px',
-      }}>
-        Loading git status...
+      <div className="cog-panel">
+        <Loading>Loading git status…</Loading>
       </div>
     )
   }
 
   const canCommit = commitMsg.trim().length > 0 && status.staged.length > 0
+  const cancelNewBranch = (): void => { setShowNewBranch(false); setNewBranchName('') }
+  const inSync = status.ahead === 0 && status.behind === 0
 
   return (
-    <div style={{
-      height: '100%',
-      backgroundColor: '#1e1e1e',
-      display: 'flex',
-      flexDirection: 'column',
-      color: '#ccc',
-      fontSize: '12px',
-      overflow: 'hidden',
-    }}>
+    <div className="cog-panel cog-git">
       {/* ── Error banner ─────────────────────────────────── */}
       {error && (
-        <div style={{
-          padding: '6px 10px',
-          backgroundColor: 'rgba(244,67,54,0.15)',
-          borderBottom: '1px solid #f44336',
-          color: '#f44336',
-          fontSize: '11px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexShrink: 0,
-        }}>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {error}
-          </span>
-          <span
-            onClick={() => setError(null)}
-            style={{ cursor: 'pointer', marginLeft: '8px', fontSize: '14px', flexShrink: 0 }}
-          >
-            x
-          </span>
+        <div className="cog-banner cog-banner--danger" role="alert">
+          <Icon name="circle-alert" size={14} />
+          <span className="cog-banner__text" title={error}>{error}</span>
+          <Button variant="icon" className="cog-btn--ghost" onClick={() => setError(null)} aria-label="Dismiss error" title="Dismiss">
+            <Icon name="x" size={14} />
+          </Button>
         </div>
       )}
 
       {/* ── Branch bar ───────────────────────────────────── */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '6px 10px',
-        backgroundColor: '#252525',
-        borderBottom: '1px solid #333',
-        flexShrink: 0,
-        flexWrap: 'wrap',
-      }}>
-        {/* Branch name + dropdown */}
-        <div style={{ position: 'relative' }} ref={branchDropdownRef}>
-          <div
-            onClick={() => { setShowBranches(!showBranches); if (!showBranches) fetchBranches() }}
-            style={{
-              padding: '2px 8px',
-              backgroundColor: '#333',
-              borderRadius: '3px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '12px',
-              color: '#e0e0e0',
-            }}
-          >
-            <span style={{ fontSize: '11px' }}>{'\u2387'}</span>
-            {status.branch || 'HEAD'}
-            <span style={{ fontSize: '9px', color: '#888' }}>{'\u25BC'}</span>
-          </div>
-
-          {showBranches && (
-            <div style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              marginTop: '2px',
-              backgroundColor: '#2a2a2a',
-              border: '1px solid #555',
-              borderRadius: '4px',
-              maxHeight: '200px',
-              overflow: 'auto',
-              zIndex: 100,
-              minWidth: '160px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-            }}>
-              {branches.map(b => (
-                <div
-                  key={b}
-                  onClick={() => switchBranch(b)}
-                  style={{
-                    padding: '4px 10px',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    color: b === status.branch ? '#4caf50' : '#ccc',
-                    fontWeight: b === status.branch ? 600 : 400,
+      <Toolbar
+        label="Git"
+        actions={
+          <>
+            {showNewBranch ? (
+              <div className="cog-git__newbranch">
+                <Input
+                  mono
+                  autoFocus
+                  value={newBranchName}
+                  onChange={e => setNewBranchName(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') createBranch()
+                    if (e.key === 'Escape') cancelNewBranch()
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#333')}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                  {b === status.branch ? '* ' : '  '}{b}
-                </div>
-              ))}
-              {branches.length === 0 && (
-                <div style={{ padding: '6px 10px', color: '#666', fontSize: '11px' }}>
-                  No branches found
-                </div>
-              )}
-            </div>
-          )}
+                  placeholder="branch-name"
+                  aria-label="New branch name"
+                />
+                <Button onClick={createBranch} disabled={loading === 'new-branch'}>
+                  {loading === 'new-branch' ? 'Creating…' : 'Create'}
+                </Button>
+                <Button variant="icon" className="cog-btn--ghost" onClick={cancelNewBranch} aria-label="Cancel new branch" title="Cancel">
+                  <Icon name="x" size={14} />
+                </Button>
+              </div>
+            ) : (
+              <Button variant="ghost" onClick={() => setShowNewBranch(true)} title="New branch">
+                <Icon name="plus" size={14} />
+                <span>Branch</span>
+              </Button>
+            )}
+            <Button
+              variant="icon"
+              className="cog-btn--ghost"
+              onClick={() => { refreshStatus(); refreshLog(); refreshWorktrees() }}
+              aria-label="Refresh"
+              title="Refresh"
+            >
+              <Icon name="refresh-cw" size={14} />
+            </Button>
+            <Button variant="ghost" onClick={pull} disabled={loading === 'pull'} title="Pull">
+              <Icon name="arrow-down" size={14} />
+              <span>{loading === 'pull' ? 'Pulling…' : 'Pull'}</span>
+            </Button>
+            <Button variant="ghost" onClick={push} disabled={status.ahead === 0 || loading === 'push'} title="Push">
+              <Icon name="arrow-up" size={14} />
+              <span>{loading === 'push' ? 'Pushing…' : 'Push'}</span>
+            </Button>
+          </>
+        }
+      >
+        {/* Branch name + dropdown */}
+        <div className="cog-menu-wrap" ref={branchDropdownRef}>
+          <Button
+            ref={branchButtonRef}
+            variant="ghost"
+            className="cog-git__branch"
+            aria-haspopup="menu"
+            aria-expanded={showBranches}
+            title={status.branch || 'HEAD'}
+            onClick={() => { setShowBranches(!showBranches); if (!showBranches) fetchBranches() }}
+          >
+            <Icon name="git-branch" size={14} />
+            <span>{status.branch || 'HEAD'}</span>
+            <Icon name="chevron-down" size={14} />
+          </Button>
+          <Menu
+            open={showBranches}
+            onClose={() => setShowBranches(false)}
+            anchorRef={branchButtonRef}
+            label="Branches"
+            closeOnOutside={false}
+          >
+            {branches.map(b => (
+              <MenuItem key={b} checked={b === status.branch} onClick={() => switchBranch(b)}>
+                <span className="cog-mono">{b}</span>
+              </MenuItem>
+            ))}
+            {branches.length === 0 && <div className="cog-menu__note">No branches found</div>}
+          </Menu>
         </div>
 
         {/* Ahead/behind */}
-        <span style={{ color: '#888', fontSize: '11px' }}>
-          {status.ahead > 0 && <span style={{ color: '#4caf50' }}>{'\u2191'}{status.ahead}</span>}
-          {(status.ahead > 0 && status.behind > 0) && ' '}
-          {status.behind > 0 && <span style={{ color: '#f44336' }}>{'\u2193'}{status.behind}</span>}
-          {status.ahead === 0 && status.behind === 0 && (
-            <span style={{ color: '#555' }}>{'\u2191'}0 {'\u2193'}0</span>
+        <span
+          className="cog-git__sync"
+          title={`${status.ahead} ahead, ${status.behind} behind`}
+          aria-label={`${status.ahead} commits ahead, ${status.behind} behind`}
+        >
+          {inSync ? (
+            <>
+              <span><Icon name="arrow-up" size={12} />0</span>
+              <span><Icon name="arrow-down" size={12} />0</span>
+            </>
+          ) : (
+            <>
+              {status.ahead > 0 && <span className="cog-tone-success"><Icon name="arrow-up" size={12} />{status.ahead}</span>}
+              {status.behind > 0 && <span className="cog-tone-danger"><Icon name="arrow-down" size={12} />{status.behind}</span>}
+            </>
           )}
         </span>
-
-        <div style={{ flex: 1 }} />
-
-        {/* New branch */}
-        {showNewBranch ? (
-          <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-            <input
-              autoFocus
-              value={newBranchName}
-              onChange={e => setNewBranchName(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') createBranch()
-                if (e.key === 'Escape') { setShowNewBranch(false); setNewBranchName('') }
-              }}
-              placeholder="branch-name"
-              style={{
-                padding: '2px 6px',
-                fontSize: '11px',
-                backgroundColor: '#1e1e1e',
-                color: '#ccc',
-                border: '1px solid #555',
-                borderRadius: '3px',
-                outline: 'none',
-                width: '120px',
-              }}
-            />
-            <Btn label="OK" onClick={createBranch} small loading={loading === 'new-branch'} />
-            <Btn label="X" onClick={() => { setShowNewBranch(false); setNewBranchName('') }} small />
-          </div>
-        ) : (
-          <Btn label="+ Branch" onClick={() => setShowNewBranch(true)} small />
-        )}
-
-        <Btn label={'\u21BB'} onClick={() => { refreshStatus(); refreshLog(); refreshWorktrees() }} small />
-        <Btn label="Pull" onClick={pull} small loading={loading === 'pull'} />
-        <Btn label="Push" onClick={push} small loading={loading === 'push'} disabled={status.ahead === 0} />
-      </div>
+      </Toolbar>
 
       {/* ── Agent worktrees ──────────────────────────────── */}
       {worktrees.length > 0 && (
-        <div style={{ borderBottom: '1px solid #333', flexShrink: 0, maxHeight: '140px', overflow: 'auto' }}>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '4px 10px', gap: '6px' }}>
-            <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px', color: '#888', flex: 1 }}>
-              Agent worktrees
-            </span>
-            <Btn
-              label="Remove all clean"
-              small
-              onClick={removeAllClean}
-              disabled={!worktrees.some(w => !w.dirty && !w.agentName)}
-            />
-          </div>
+        <div className="cog-git__worktrees">
+          <SectionHeader
+            count={worktrees.length}
+            actions={
+              <Button
+                variant="ghost"
+                className="cog-tone-danger"
+                onClick={removeAllClean}
+                disabled={!worktrees.some(w => !w.dirty && !w.agentName)}
+              >
+                Remove all clean
+              </Button>
+            }
+          >
+            Agent worktrees
+          </SectionHeader>
           {worktrees.map(w => (
-            <div key={w.slug} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 10px', fontSize: '11px', color: '#ccc' }}>
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.path}>
-                {w.slug} {'·'} {w.branch ?? `cog/${w.slug}`} {'·'}{' '}
-                <span style={{ color: w.dirty ? '#ffc107' : '#4caf50' }}>{w.dirty ? 'dirty' : 'clean'}</span>
-                {' '}{'·'} {w.agentName ?? '—'}
-              </span>
-              <Btn
-                label="Remove"
-                small
-                disabled={!!w.agentName}
-                onClick={() => removeWorktree(w)}
-              />
-            </div>
+            <Row
+              key={w.slug}
+              tooltip={w.path}
+              icon={<Icon name="git-branch" size={14} />}
+              id={w.slug}
+              title={<span className="cog-mono">{w.branch ?? `cog/${w.slug}`}</span>}
+              meta={w.agentName ?? '—'}
+              state={w.dirty ? (
+                <span className="cog-row__state cog-tone-warning"><Icon name="circle-dot" size={12} />dirty</span>
+              ) : (
+                <span className="cog-row__state cog-tone-success"><Icon name="circle-check" size={12} />clean</span>
+              )}
+              actions={
+                <Button
+                  variant="ghost"
+                  className="cog-tone-danger"
+                  disabled={!!w.agentName}
+                  onClick={() => removeWorktree(w)}
+                  title={w.agentName ? `In use by ${w.agentName}` : 'Remove worktree'}
+                >
+                  Remove
+                </Button>
+              }
+            />
           ))}
         </div>
       )}
 
       {/* ── View mode toggle ─────────────────────────────── */}
-      <div style={{
-        display: 'flex',
-        borderBottom: '1px solid #333',
-        flexShrink: 0,
-      }}>
-        {(['status', 'log'] as const).map(mode => (
-          <div
-            key={mode}
-            onClick={() => { setViewMode(mode); if (mode === 'log') refreshLog() }}
-            style={{
-              flex: 1,
-              padding: '5px 0',
-              textAlign: 'center',
-              fontSize: '11px',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              cursor: 'pointer',
-              color: viewMode === mode ? '#e0e0e0' : '#666',
-              backgroundColor: viewMode === mode ? '#1e1e1e' : '#252525',
-              borderBottom: viewMode === mode ? '2px solid #4caf50' : '2px solid transparent',
-            }}
-          >
-            {mode}
-          </div>
-        ))}
+      <div className="cog-git__view">
+        <Segmented
+          ariaLabel="Git view"
+          value={viewMode}
+          options={[
+            { value: 'status', label: 'Status', icon: 'file-text' },
+            { value: 'log', label: 'Log', icon: 'git-commit' }
+          ]}
+          onChange={mode => { setViewMode(mode); if (mode === 'log') refreshLog() }}
+        />
       </div>
 
       {/* ── Content area ─────────────────────────────────── */}
-      <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+      <div className="cog-git__body">
         {viewMode === 'status' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <div className="cog-git__status">
             {/* Staged files */}
-            <div>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '4px 10px',
-                backgroundColor: '#252525',
-                borderBottom: '1px solid #333',
-              }}>
-                <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Staged ({status.staged.length})
-                </span>
-                {status.staged.length > 0 && (
-                  <Btn label="Unstage All" onClick={unstageAll} small />
-                )}
-              </div>
+            <SectionHeader
+              count={status.staged.length}
+              actions={status.staged.length > 0 ? <Button variant="ghost" onClick={unstageAll}>Unstage all</Button> : null}
+            >
+              Staged
+            </SectionHeader>
+            <div className="cog-git__files">
               {status.staged.length === 0 ? (
-                <div style={{ padding: '8px 10px', color: '#555', fontSize: '11px' }}>
-                  No staged changes
-                </div>
+                <EmptyState icon="circle-dot" compact>No staged changes. Stage a file below to include it in the next commit.</EmptyState>
               ) : (
                 status.staged.map(f => (
                   <FileItem
                     key={`staged-${f.path}`}
                     file={f}
-                    action={() => unstageFile(f.path)}
-                    actionLabel="-"
+                    actionLabel="Unstage"
+                    actionIcon="minus"
                     onAction={() => unstageFile(f.path)}
                     onClick={() => fetchDiff(f.path, true)}
                     selected={selectedFile === f.path && selectedFileStaged}
@@ -705,34 +551,22 @@ export function GitPanel(): React.ReactElement {
             </div>
 
             {/* Unstaged / changes */}
-            <div>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '4px 10px',
-                backgroundColor: '#252525',
-                borderBottom: '1px solid #333',
-                borderTop: '1px solid #333',
-              }}>
-                <span style={{ fontSize: '11px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  Changes ({status.unstaged.length})
-                </span>
-                {status.unstaged.length > 0 && (
-                  <Btn label="Stage All" onClick={stageAll} small />
-                )}
-              </div>
+            <SectionHeader
+              count={status.unstaged.length}
+              actions={status.unstaged.length > 0 ? <Button variant="ghost" onClick={stageAll}>Stage all</Button> : null}
+            >
+              Changes
+            </SectionHeader>
+            <div className="cog-git__files">
               {status.unstaged.length === 0 ? (
-                <div style={{ padding: '8px 10px', color: '#555', fontSize: '11px' }}>
-                  No unstaged changes
-                </div>
+                <EmptyState icon="circle-check" compact>No unstaged changes. Files you edit appear here.</EmptyState>
               ) : (
                 status.unstaged.map(f => (
                   <FileItem
                     key={`unstaged-${f.path}`}
                     file={f}
-                    action={() => stageFile(f.path)}
-                    actionLabel="+"
+                    actionLabel="Stage"
+                    actionIcon="plus"
                     onAction={() => stageFile(f.path)}
                     onClick={() => fetchDiff(f.path, false)}
                     selected={selectedFile === f.path && !selectedFileStaged}
@@ -743,25 +577,22 @@ export function GitPanel(): React.ReactElement {
 
             {/* Diff viewer */}
             {diffContent && (
-              <div style={{ borderTop: '1px solid #333', flex: 1, overflow: 'auto', minHeight: '80px' }}>
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '4px 10px',
-                  backgroundColor: '#252525',
-                  borderBottom: '1px solid #333',
-                }}>
-                  <span style={{ fontSize: '11px', color: '#888' }}>
-                    {selectedFile} {selectedFileStaged ? '(staged)' : '(unstaged)'}
-                  </span>
-                  <span
-                    onClick={() => { setSelectedFile(null); setDiffContent('') }}
-                    style={{ cursor: 'pointer', color: '#666', fontSize: '14px' }}
-                  >
-                    x
-                  </span>
-                </div>
+              <div className="cog-git__diff">
+                <SectionHeader
+                  actions={
+                    <Button
+                      variant="icon"
+                      className="cog-btn--ghost"
+                      onClick={() => { setSelectedFile(null); setDiffContent('') }}
+                      aria-label="Close diff"
+                      title="Close diff"
+                    >
+                      <Icon name="x" size={14} />
+                    </Button>
+                  }
+                >
+                  {selectedFile}<em>{selectedFileStaged ? 'staged' : 'unstaged'}</em>
+                </SectionHeader>
                 <DiffViewer diff={diffContent} />
               </div>
             )}
@@ -770,48 +601,18 @@ export function GitPanel(): React.ReactElement {
           /* ── Log view ────────────────────────────────────── */
           <div>
             {log.length === 0 ? (
-              <div style={{ padding: '12px', color: '#555', fontSize: '12px', textAlign: 'center' }}>
-                No commits found
-              </div>
+              <EmptyState icon="git-commit">No commits found. Commits on this branch appear here, newest first.</EmptyState>
             ) : (
               log.map(entry => (
-                <div
+                <Row
                   key={entry.sha}
-                  style={{
-                    padding: '6px 10px',
-                    borderBottom: '1px solid #2a2a2a',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '2px',
-                  }}
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#252525')}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{
-                      fontFamily: 'Consolas, "Courier New", monospace',
-                      fontSize: '11px',
-                      color: '#ffc107',
-                      flexShrink: 0,
-                    }}>
-                      {entry.sha.slice(0, 7)}
-                    </span>
-                    <span style={{
-                      color: '#e0e0e0',
-                      fontSize: '12px',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      flex: 1,
-                    }}>
-                      {entry.message}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', fontSize: '10px', color: '#666' }}>
-                    <span>{entry.author}</span>
-                    <span>{entry.relativeDate}</span>
-                  </div>
-                </div>
+                  tooltip={entry.message}
+                  icon={<Icon name="git-commit" size={14} />}
+                  id={entry.sha.slice(0, 7)}
+                  title={entry.message}
+                  meta={entry.author}
+                  state={<span className="cog-mono">{entry.relativeDate}</span>}
+                />
               ))
             )}
           </div>
@@ -819,44 +620,25 @@ export function GitPanel(): React.ReactElement {
       </div>
 
       {/* ── Commit section ───────────────────────────────── */}
-      <div style={{
-        borderTop: '1px solid #333',
-        padding: '8px 10px',
-        backgroundColor: '#252525',
-        flexShrink: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '6px',
-      }}>
-        <textarea
+      <div className="cog-git__commit">
+        <Textarea
           value={commitMsg}
           onChange={e => setCommitMsg(e.target.value)}
-          placeholder="Commit message..."
+          placeholder="Commit message"
+          aria-label="Commit message"
           rows={2}
           onKeyDown={e => {
             if (e.ctrlKey && e.key === 'Enter' && canCommit) commit()
           }}
-          style={{
-            width: '100%',
-            padding: '6px 8px',
-            fontSize: '12px',
-            backgroundColor: '#1e1e1e',
-            color: '#ccc',
-            border: '1px solid #333',
-            borderRadius: '3px',
-            outline: 'none',
-            resize: 'vertical',
-            fontFamily: 'inherit',
-            boxSizing: 'border-box',
-          }}
         />
-        <Btn
-          label={loading === 'commit' ? 'Committing...' : `Commit (${status.staged.length} file${status.staged.length !== 1 ? 's' : ''})`}
-          onClick={commit}
-          disabled={!canCommit}
-          loading={loading === 'commit'}
-          style={{ width: '100%' }}
-        />
+        <Button onClick={commit} disabled={!canCommit || loading === 'commit'} title="Commit (Ctrl+Enter)">
+          <Icon name="git-commit" size={14} />
+          <span>
+            {loading === 'commit'
+              ? 'Committing…'
+              : `Commit ${status.staged.length} file${status.staged.length !== 1 ? 's' : ''}`}
+          </span>
+        </Button>
       </div>
     </div>
   )

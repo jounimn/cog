@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import Editor from '@monaco-editor/react'
+import { Button, Icon, EmptyState, SectionHeader } from '../ui'
 
 interface FileEntry {
   name: string
@@ -57,32 +58,25 @@ function TreeNode({ entry, depth, onFileClick }: {
     setExpanded(!expanded)
   }
 
+  const isDir = entry.type === 'directory'
   return (
     <div>
-      <div
+      <button
+        type="button"
+        className="cog-tree__item"
         onClick={handleToggle}
-        style={{
-          padding: '2px 0',
-          paddingLeft: `${depth * 16 + 8}px`,
-          cursor: 'pointer',
-          fontSize: '12px',
-          color: entry.type === 'directory' ? '#c8a86e' : '#ccc',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          lineHeight: '22px',
-        }}
-        onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#2a2d2e')}
-        onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
+        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        title={entry.path}
+        aria-expanded={isDir ? expanded : undefined}
       >
-        {entry.type === 'directory' && (
-          <span style={{ display: 'inline-block', width: '12px', fontSize: '10px' }}>
-            {expanded ? '\u25BC' : '\u25B6'}
-          </span>
-        )}
-        {entry.type === 'file' && <span style={{ display: 'inline-block', width: '12px' }} />}
-        {' '}{entry.name}
-      </div>
+        <span className="cog-tree__chev" aria-hidden="true">
+          {isDir && <Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} />}
+        </span>
+        <span className="cog-tree__kind" aria-hidden="true">
+          <Icon name={isDir ? (expanded ? 'folder-open' : 'folder') : 'file'} size={14} />
+        </span>
+        <span className="cog-tree__name">{entry.name}</span>
+      </button>
       {expanded && children.map(child => (
         <TreeNode key={child.path} entry={child} depth={depth + 1} onFileClick={onFileClick} />
       ))}
@@ -159,66 +153,39 @@ export function FilePanel(): React.ReactElement {
   const activeFile = openFiles.find(f => f.path === activeTab)
 
   return (
-    <div style={{ display: 'flex', height: '100%', backgroundColor: '#1e1e1e' }}>
+    <div className="cog-panel cog-files">
       {/* File tree sidebar */}
-      <div style={{
-        width: '220px',
-        minWidth: '150px',
-        borderRight: '1px solid #333',
-        overflow: 'auto',
-        flexShrink: 0,
-      }}>
-        <div style={{
-          padding: '8px 12px',
-          fontSize: '11px',
-          color: '#888',
-          textTransform: 'uppercase',
-          letterSpacing: '0.5px',
-          borderBottom: '1px solid #333'
-        }}>
-          Explorer
-        </div>
+      <div className="cog-files__tree">
+        <SectionHeader>Explorer</SectionHeader>
         {rootFiles.map(entry => (
           <TreeNode key={entry.path} entry={entry} depth={0} onFileClick={openFile} />
         ))}
       </div>
 
       {/* Editor area */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div className="cog-files__main">
         {/* Tabs */}
         {openFiles.length > 0 && (
-          <div style={{
-            display: 'flex',
-            height: '32px',
-            backgroundColor: '#252525',
-            borderBottom: '1px solid #333',
-            overflow: 'auto',
-          }}>
+          <div className="cog-ftabs" role="tablist" aria-label="Open files">
             {openFiles.map(file => (
               <div
                 key={file.path}
+                role="tab"
+                aria-selected={activeTab === file.path}
+                className="cog-ftab"
+                title={file.path}
                 onClick={() => setActiveTab(file.path)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '0 12px',
-                  fontSize: '12px',
-                  color: activeTab === file.path ? '#e0e0e0' : '#888',
-                  backgroundColor: activeTab === file.path ? '#1e1e1e' : 'transparent',
-                  borderRight: '1px solid #333',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  minWidth: 0,
-                }}
               >
-                <span>{file.dirty ? '\u25CF ' : ''}{file.name}</span>
-                <span
+                {file.dirty && <span className="cog-ftab__dirty" title="Unsaved changes" aria-label="Unsaved changes" />}
+                <span>{file.name}</span>
+                <Button
+                  variant="icon"
                   onClick={e => closeTab(file.path, e)}
-                  style={{ fontSize: '14px', color: '#666', marginLeft: '4px' }}
+                  aria-label={`Close ${file.name}`}
+                  title="Close"
                 >
-                  x
-                </span>
+                  <Icon name="x" size={14} />
+                </Button>
               </div>
             ))}
           </div>
@@ -243,16 +210,7 @@ export function FilePanel(): React.ReactElement {
             }}
           />
         ) : (
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#555',
-            fontSize: '13px'
-          }}>
-            Click a file in the explorer to open it
-          </div>
+          <EmptyState icon="file-text">Click a file in the explorer to open it here.</EmptyState>
         )}
       </div>
     </div>
