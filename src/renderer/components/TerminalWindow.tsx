@@ -7,6 +7,7 @@ import { appearanceStore, useAppearance } from '../appearance-store'
 import { resolveAppearance, fontLoadSpecs } from '../terminal-appearance'
 import { createTerminalRegistry } from '../terminal-registry'
 import { debounce } from '../debounce'
+import { createLatestWins, type LatestWins } from '../latest-wins'
 
 interface TerminalWindowProps {
   agentId: string
@@ -21,6 +22,8 @@ interface TerminalHandle {
   element: HTMLDivElement
   /** Set once dispose() ran; async font work must not touch the terminal afterwards. */
   disposed: boolean
+  /** Orders font applications: only the most recent request may set the font. */
+  fontRequests: LatestWins
   dispose(): void
 }
 
@@ -43,8 +46,8 @@ function createTerminal(agentId: string): TerminalHandle {
   element.style.width = '100%'
   element.style.height = '100%'
 
-  // Global appearance only; the component's effect applies the agent-specific
-  // resolution (name + theme) as soon as it mounts.
+  // Global appearance only; the component's effect is the single owner of the
+  // font: it applies the agent-specific resolution (name + theme) on mount.
   const initial = resolveAppearance(appearanceStore.get(), '')
   const term = new Terminal({
     theme: initial.xterm,
@@ -101,6 +104,7 @@ function createTerminal(agentId: string): TerminalHandle {
     fit,
     element,
     disposed: false,
+    fontRequests: createLatestWins(),
     dispose() {
       handle.disposed = true
       cleanupOutput()
@@ -109,12 +113,6 @@ function createTerminal(agentId: string): TerminalHandle {
       element.remove()
     }
   }
-
-  void ensureFontsLoaded(initial.fontFamily, initial.fontSize).then(() => {
-    if (handle.disposed) return
-    term.options.fontFamily = initial.fontFamily
-    if (element.isConnected) fit.fit()
-  })
 
   return handle
 }
@@ -171,23 +169,24 @@ export function TerminalWindow({ agentId, agentName, theme }: TerminalWindowProp
     }
   }, [agentId])
 
-  // Live-apply font, size and colours (appearance, agent name or theme change)
-  // without re-creating the terminal; refit and tell the PTY the new size.
+  // The one place the font is applied: live-apply font, size and colours
+  // (appearance, agent name or theme change) without re-creating the terminal.
+  // Font loads can settle out of order, so only the latest request applies;
+  // every refit is followed by the PTY resize so xterm and PTY cols agree.
   useEffect(() => {
     if (!terminalRegistry.has(agentId)) return
     const handle = terminalRegistry.acquire(agentId)
     const { term, fit } = handle
     term.options.theme = resolved.xterm
-    let cancelled = false
+    const isLatest = handle.fontRequests.begin()
     void ensureFontsLoaded(resolved.fontFamily, resolved.fontSize).then(() => {
-      if (cancelled || handle.disposed) return
+      if (!isLatest() || handle.disposed) return
       term.options.fontFamily = resolved.fontFamily
       term.options.fontSize = resolved.fontSize
       if (!containerRef.current?.contains(term.element ?? null)) return
       fit.fit()
       window.electronAPI.resizePty(agentId, term.cols, term.rows)
     })
-    return () => { cancelled = true }
   }, [agentId, resolved.fontFamily, resolved.fontSize, resolved.xterm])
 
   return (
