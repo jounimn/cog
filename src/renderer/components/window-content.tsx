@@ -1,8 +1,7 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { TerminalWindow } from './TerminalWindow'
 import { PinboardPanel } from './PinboardPanel'
 import { InfoChannelPanel } from './InfoChannelPanel'
-import { FilePanel } from './FilePanel'
 import { RacPanel } from './RacPanel'
 import { UsagePanel } from './UsagePanel'
 import { GitPanel } from './GitPanel'
@@ -15,6 +14,10 @@ import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import { getPanelType } from '../panel-ids'
 import type { PlateSpec } from './PlateHeader'
+import { Loading } from '../ui'
+
+// Monaco is ~10 MB: keep it out of the main chunk until a Files panel opens.
+const FilePanel = lazy(() => import('./FilePanel').then(m => ({ default: m.FilePanel })))
 
 export interface WindowContentContext {
   agents: AgentState[]
@@ -43,7 +46,7 @@ export function renderWindowContent(win: WindowState, ctx: WindowContentContext)
   } else if (panelType === 'info') {
     return <InfoChannelPanel tabId={activeTabId} />
   } else if (panelType === 'files') {
-    return <FilePanel />
+    return <Suspense fallback={<Loading />}><FilePanel /></Suspense>
   } else if (panelType === 'rac') {
     return <RacPanel />
   } else if (panelType === 'usage') {
