@@ -38,7 +38,8 @@ interface FloatingWindowProps {
   onSnapPreviewChange: (info: SnapZoneInfo | null) => void
   onSnap: (bounds: SnapBounds, restoreBounds: SnapBounds) => void
   isAgent?: boolean
-  groupColor?: string
+  /** Resolved terminal background: plate frame and body share it so they read as one surface. */
+  bodyBg?: string
   onLinkDragStart?: (e: React.MouseEvent) => void
   theme?: AgentTheme
   agentId?: string
@@ -91,7 +92,7 @@ export function FloatingWindow({
   onSnapPreviewChange,
   onSnap,
   isAgent,
-  groupColor,
+  bodyBg,
   onLinkDragStart,
   theme,
   agentId,
@@ -254,7 +255,7 @@ export function FloatingWindow({
     ...windowStyle,
     opacity: presentation.opacity,
     border: `1px solid ${accent?.border ?? (focused ? c('steel') : c('line-strong'))}`,
-    backgroundColor: accent ? resolvedTheme.bg : c('surface')
+    backgroundColor: bodyBg ?? (accent ? resolvedTheme.bg : c('surface'))
   }
   const titleText = `${presentation.titlePrefix}${title}`
   const onTitleDoubleClick = status === 'sleeping' && onWakeAgent && agentId ? () => onWakeAgent(agentId) : onMaximize
@@ -288,7 +289,7 @@ export function FloatingWindow({
         ...frameStyle, overflow: 'hidden'
       }}>
         {header(true)}
-        <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>
+        <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bodyBg }}>{children}</div>
         {themeMenu && <ThemeMenu x={themeMenu.x} y={themeMenu.y} theme={theme} onClose={() => setThemeMenu(null)} onApplyPreset={applyPreset} onChangeField={updateThemeField} onEdit={onEditAgent && agentId ? () => onEditAgent(agentId) : undefined} menu={presentation.menu} onSleep={onSleepAgent && agentId ? () => onSleepAgent(agentId) : undefined} onWake={onWakeAgent && agentId ? () => onWakeAgent(agentId) : undefined} />}
         {customMenu}
       </div>,
@@ -321,20 +322,21 @@ export function FloatingWindow({
               position: 'absolute',
               left: 8,
               bottom: 8,
-              width: 12,
-              height: 12,
-              borderRadius: '50%',
-              backgroundColor: groupColor || c('ink-subtle'),
-              border: `2px solid ${c('line-strong')}`,
+              width: 8,
+              height: 8,
+              boxSizing: 'border-box',
+              borderRadius: 1,
+              backgroundColor: c('surface'),
+              border: `1.5px solid ${c('steel')}`,
               cursor: 'crosshair',
               zIndex: 10,
-              transition: 'transform var(--dur) var(--ease-out)',
+              transition: 'border-color var(--dur) var(--ease-out)',
             }}
-            onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.5)')}
-            onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+            onMouseEnter={e => (e.currentTarget.style.borderColor = c('focus'))}
+            onMouseLeave={e => (e.currentTarget.style.borderColor = c('steel'))}
           />
         )}
-        <div style={{ flex: 1, overflow: 'hidden' }}>{children}</div>
+        <div style={{ flex: 1, overflow: 'hidden', backgroundColor: bodyBg }}>{children}</div>
       </div>
       {focused && <PlateTicks />}
       {themeMenu && <ThemeMenu x={themeMenu.x} y={themeMenu.y} theme={theme} onClose={() => setThemeMenu(null)} onApplyPreset={applyPreset} onChangeField={updateThemeField} onEdit={onEditAgent && agentId ? () => onEditAgent(agentId) : undefined} menu={presentation.menu} onSleep={onSleepAgent && agentId ? () => onSleepAgent(agentId) : undefined} onWake={onWakeAgent && agentId ? () => onWakeAgent(agentId) : undefined} />}

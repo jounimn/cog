@@ -13,6 +13,8 @@ import type { WindowState } from '../hooks/useWindowManager'
 import type { AgentState, WorkspaceTab } from '../../shared/types'
 import type { SnapBounds, SnapZoneInfo, WindowBounds } from '../hooks/useSnapZones'
 import { clientToCanvas } from '../canvas-math'
+import { useAppearance } from '../appearance-store'
+import { resolveAppearance } from '../terminal-appearance'
 import { getPanelType } from '../panel-ids'
 import { renderWindowContent, windowAgent, windowHeading } from './window-content'
 
@@ -74,6 +76,7 @@ export function Workspace({
   fitRequest
 }: WorkspaceProps): React.ReactElement {
   const viewportRef = useRef<HTMLDivElement>(null)
+  const appearance = useAppearance()
   const [isPanning, setIsPanning] = useState(false)
   const panStartRef = useRef({ x: 0, y: 0 })
   const [transitionEnabled, setTransitionEnabled] = useState(false)
@@ -441,7 +444,9 @@ export function Workspace({
                 onSnapPreviewChange={setSnapPreview}
                 onSnap={(bounds, restoreBounds) => handleSnap(win.id, bounds, restoreBounds)}
                 isAgent={!!agent}
-                groupColor={agent ? groups.find(g => g.members.includes(agent.name))?.color : undefined}
+                bodyBg={agent && !agent.name.startsWith('rac-')
+                  ? resolveAppearance(appearance, agent.name, agent.theme).xterm.background
+                  : undefined}
                 onLinkDragStart={agent ? (e: React.MouseEvent) => handleLinkDragStart(agent.name, e) : undefined}
                 theme={agent?.theme}
                 agentId={agent?.id}
