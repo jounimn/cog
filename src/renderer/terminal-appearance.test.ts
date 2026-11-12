@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  DEFAULT_APPEARANCE, FONTS, PALETTES, resolveAppearance, sanitizeSettings
+  DEFAULT_APPEARANCE, FONTS, fontStack, fontLoadSpecs, PALETTES, resolveAppearance, sanitizeSettings
 } from './terminal-appearance'
 import type { AppearanceSettings } from './terminal-appearance'
 import { DEFAULT_THEME, THEME_PRESETS } from './themes'
@@ -75,5 +75,21 @@ describe('data', () => {
       for (const c of p.ansi) expect(c).toMatch(/^#[0-9a-f]{6}$/i)
       expect(contrast(p.fg, p.bg)).toBeGreaterThanOrEqual(4.5)
     }
+  })
+})
+
+describe('font stacks', () => {
+  it('lists the system Cascadia Code before the bundled copy', () => {
+    const f = FONTS.find(x => x.id === 'cascadia')!.family
+    expect(f.indexOf('"Cascadia Code"')).toBe(0)
+    expect(f.indexOf('"Cascadia Code Bundled"')).toBeGreaterThan(f.indexOf('"Cascadia Code"'))
+  })
+  it('fontStack appends the fallback', () => {
+    expect(fontStack('Fira Code')).toBe('"Fira Code", "IBM Plex Mono", monospace')
+  })
+  it('fontLoadSpecs yields one spec per quoted family', () => {
+    expect(fontLoadSpecs(fontStack('Cascadia Code', 'Cascadia Code Bundled'), 13)).toEqual([
+      '13px "Cascadia Code"', '13px "Cascadia Code Bundled"', '13px "IBM Plex Mono"'
+    ])
   })
 })

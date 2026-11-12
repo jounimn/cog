@@ -52,8 +52,19 @@ html, body, #root {
   animation: none !important;
 }
 
-/* Message in flight along a link: dash travels the trace (length set per path as --len) */
+/* Message in flight along a link: dash travels the trace (paths use pathLength=1000) */
 @keyframes link-dash {
   from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: calc(var(--len, 1000) * -1); }
+  to { stroke-dashoffset: -1000; }
+}
+
+pre, code, kbd, samp {
+  font-family: var(--font-mono);
+}
+
+/* Reduced-motion stand-in for the travelling dash: the trace itself is emphasised, no transition */
+.link-flash {
+  stroke-width: 3px;
+  opacity: 1;
+  transition: none !important;
 }

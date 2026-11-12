@@ -328,7 +328,7 @@ export function FloatingWindow({
               border: `2px solid ${c('line-strong')}`,
               cursor: 'crosshair',
               zIndex: 10,
-              transition: 'transform 0.15s',
+              transition: 'transform var(--dur) var(--ease-out)',
             }}
             onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.5)')}
             onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}

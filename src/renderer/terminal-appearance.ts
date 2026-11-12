@@ -26,8 +26,18 @@ export const DEFAULT_APPEARANCE: Appearance = { font: 'cascadia', size: 13, pale
 
 const FALLBACK = ', "IBM Plex Mono", monospace'
 
+/** Font stack for a face: the system name first, then an optional vendored copy, then the shared fallback. */
+export function fontStack(name: string, bundledName?: string): string {
+  return `"${name}"` + (bundledName ? `, "${bundledName}"` : '') + FALLBACK
+}
+
+/** `document.fonts.load` specs for every quoted family in a stack. */
+export function fontLoadSpecs(family: string, size: number): string[] {
+  return [...family.matchAll(/"([^"]+)"/g)].map(m => `${size}px "${m[1]}"`)
+}
+
 export const FONTS: { id: FontId; label: string; family: string }[] = [
-  { id: 'cascadia', label: 'Cascadia Code', family: '"Cascadia Code"' + FALLBACK },
+  { id: 'cascadia', label: 'Cascadia Code', family: fontStack('Cascadia Code', 'Cascadia Code Bundled') },
   { id: 'jetbrains', label: 'JetBrains Mono', family: '"JetBrains Mono"' + FALLBACK },
   { id: 'plex', label: 'IBM Plex Mono', family: '"IBM Plex Mono"' + FALLBACK },
   { id: 'fira', label: 'Fira Code', family: '"Fira Code"' + FALLBACK },

@@ -23,29 +23,51 @@ export function createAppearanceStore(api: SettingsApi): AppearanceStore {
   let state: AppearanceSettings = { global: { ...DEFAULT_APPEARANCE }, perAgent: {} }
   const listeners = new Set<() => void>()
 
-  const commit = (next: AppearanceSettings): void => {
-    state = sanitizeSettings(next)
+  let loading = false
+  // Edits made while load() is in flight; replayed over the persisted data afterwards
+  let queued: Array<(s: AppearanceSettings) => AppearanceSettings> = []
+
+  const persist = (): void => {
     void Promise.resolve(api.setSetting(KEY, state)).catch(() => {})
+  }
+
+  const commit = (update: (s: AppearanceSettings) => AppearanceSettings): void => {
+    state = sanitizeSettings(update(state))
+    if (loading) queued.push(update)
+    else persist()
     listeners.forEach(fn => fn())
   }
 
   return {
     get: () => state,
     async load() {
+      loading = true
       try {
         const all = await api.getSettings()
-        state = sanitizeSettings(all?.[KEY])
+        let next = sanitizeSettings(all?.[KEY])
+        for (const u of queued) next = sanitizeSettings(u(next))
+        const edited = queued.length > 0
+        state = next
+        queued = []
+        loading = false
+        if (edited) persist()
         listeners.forEach(fn => fn())
       } catch {
-        // keep defaults
+        // keep the in-memory state; flush any edits made meanwhile
+        const edited = queued.length > 0
+        queued = []
+        loading = false
+        if (edited) persist()
       }
     },
-    setGlobal: (p) => commit({ ...state, global: { ...state.global, ...p } }),
+    setGlobal: (p) => commit(s => ({ ...s, global: { ...s.global, ...p } })),
     setAgent(name, p) {
-      const perAgent = { ...state.perAgent }
-      if (p === null) delete perAgent[name]
-      else perAgent[name] = { ...perAgent[name], ...p }
-      commit({ ...state, perAgent })
+      commit(s => {
+        const perAgent = { ...s.perAgent }
+        if (p === null) delete perAgent[name]
+        else perAgent[name] = { ...perAgent[name], ...p }
+        return { ...s, perAgent }
+      })
     },
     subscribe(fn) {
       listeners.add(fn)

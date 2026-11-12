@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import type { AgentTheme } from '../../shared/types'
 import { appearanceStore, useAppearance } from '../appearance-store'
-import { resolveAppearance } from '../terminal-appearance'
+import { resolveAppearance, fontLoadSpecs } from '../terminal-appearance'
 import { createTerminalRegistry } from '../terminal-registry'
 import { debounce } from '../debounce'
 
@@ -19,7 +19,18 @@ interface TerminalHandle {
   fit: FitAddon
   /** The DOM node xterm rendered into. Re-parented on every mount. */
   element: HTMLDivElement
+  /** Set once dispose() ran; async font work must not touch the terminal afterwards. */
+  disposed: boolean
   dispose(): void
+}
+
+/** Resolve once the bundled faces of a font stack are loaded (failure is ignored). */
+async function ensureFontsLoaded(family: string, size: number): Promise<void> {
+  try {
+    await Promise.all(fontLoadSpecs(family, size).map(s => document.fonts.load(s)))
+  } catch {
+    // measure with whatever is available
+  }
 }
 
 /**
@@ -37,7 +48,8 @@ function createTerminal(agentId: string): TerminalHandle {
   const initial = resolveAppearance(appearanceStore.get(), '')
   const term = new Terminal({
     theme: initial.xterm,
-    fontFamily: initial.fontFamily,
+    // Real family is applied after its faces load, so cells are measured with the right glyphs.
+    fontFamily: 'monospace',
     fontSize: initial.fontSize,
     cursorBlink: true,
     scrollback: 5000
@@ -84,17 +96,27 @@ function createTerminal(agentId: string): TerminalHandle {
     if (filtered) window.electronAPI.writeToPty(agentId, filtered)
   })
 
-  return {
+  const handle: TerminalHandle = {
     term,
     fit,
     element,
+    disposed: false,
     dispose() {
+      handle.disposed = true
       cleanupOutput()
       disposable.dispose()
       term.dispose()
       element.remove()
     }
   }
+
+  void ensureFontsLoaded(initial.fontFamily, initial.fontSize).then(() => {
+    if (handle.disposed) return
+    term.options.fontFamily = initial.fontFamily
+    if (element.isConnected) fit.fit()
+  })
+
+  return handle
 }
 
 export const terminalRegistry = createTerminalRegistry<TerminalHandle>(createTerminal)
@@ -153,13 +175,19 @@ export function TerminalWindow({ agentId, agentName, theme }: TerminalWindowProp
   // without re-creating the terminal; refit and tell the PTY the new size.
   useEffect(() => {
     if (!terminalRegistry.has(agentId)) return
-    const { term, fit } = terminalRegistry.acquire(agentId)
-    term.options.fontFamily = resolved.fontFamily
-    term.options.fontSize = resolved.fontSize
+    const handle = terminalRegistry.acquire(agentId)
+    const { term, fit } = handle
     term.options.theme = resolved.xterm
-    if (!containerRef.current?.contains(term.element ?? null)) return
-    fit.fit()
-    window.electronAPI.resizePty(agentId, term.cols, term.rows)
+    let cancelled = false
+    void ensureFontsLoaded(resolved.fontFamily, resolved.fontSize).then(() => {
+      if (cancelled || handle.disposed) return
+      term.options.fontFamily = resolved.fontFamily
+      term.options.fontSize = resolved.fontSize
+      if (!containerRef.current?.contains(term.element ?? null)) return
+      fit.fit()
+      window.electronAPI.resizePty(agentId, term.cols, term.rows)
+    })
+    return () => { cancelled = true }
   }, [agentId, resolved.fontFamily, resolved.fontSize, resolved.xterm])
 
   return (

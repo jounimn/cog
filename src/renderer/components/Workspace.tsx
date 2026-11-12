@@ -17,7 +17,8 @@ import { getPanelType } from '../panel-ids'
 import { renderWindowContent, windowAgent, windowHeading } from './window-content'
 
 /** Layout colour sent to remote clients, which have no CSS tokens; keeps the previous grey. */
-const REMOTE_FALLBACK_COLOR = 'rgb(136 136 136)'
+// wire format: remote clients parse #rrggbb — exempt from the token rule
+const REMOTE_FALLBACK_COLOR = '#888888'
 
 interface WorkspaceProps {
   windows: WindowState[]
@@ -469,16 +470,16 @@ export function Workspace({
       <SnapPreview bounds={snapPreview?.bounds ?? null} />
 
       {/* Zoom controls — outside canvas transform */}
-      <ZoomControls
+      {!maximizedId && <ZoomControls
         zoom={zoom}
         range={visibleRange(zoom, pan, workspaceSize.width, workspaceSize.height)}
         onZoomIn={() => onSetZoom(Math.min(2.0, zoom + 0.1))}
         onZoomOut={() => onSetZoom(Math.max(0.25, zoom - 0.1))}
         onReset={handleReset}
         onFitAll={handleFitAll}
-      />
+      />}
 
-      <Minimap
+      {!maximizedId && <Minimap
         windows={windows}
         links={links}
         agents={agents}
@@ -489,7 +490,7 @@ export function Workspace({
         viewportHeight={workspaceSize.height}
         sheetName={tabs.find(t => t.id === activeTabId)?.name ?? 'Workspace'}
         onSetPan={onSetPan}
-      />
+      />}
     </div>
   )
 }

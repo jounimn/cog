@@ -83,26 +83,22 @@ function prefersReducedMotion(): boolean {
 }
 
 /** The in-flight message: a short hint-coloured dash travelling along the trace. */
-function MessageDash({ d }: { d: string }): React.ReactElement {
-  const ref = useRef<SVGPathElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (el) el.style.setProperty('--len', String(el.getTotalLength()))
-  }, [d])
+function MessageDash({ d, reversed }: { d: string; reversed: boolean }): React.ReactElement {
   return (
     <path
-      ref={ref}
       data-anim
       d={d}
+      pathLength={1000}
       fill="none"
       strokeWidth={3}
       strokeLinecap="round"
       strokeLinejoin="round"
       style={{
         stroke: c('hint'),
-        strokeDasharray: '18 2000',
+        strokeDasharray: '18 100000',
         pointerEvents: 'none',
-        animation: `link-dash ${FLIGHT_MS}ms var(--ease-out) forwards`
+        animation: `link-dash ${FLIGHT_MS}ms var(--ease-out) forwards`,
+        animationDirection: reversed ? 'reverse' : 'normal'
       }}
     />
   )
@@ -114,7 +110,7 @@ export function LinkOverlay({
 }: LinkOverlayProps): React.ReactElement {
   const [hoveredLink, setHoveredLink] = useState<number | null>(null)
   // Links with a message in flight: key -> run counter (a new message restarts the dash)
-  const [flights, setFlights] = useState<Record<string, number>>({})
+  const [flights, setFlights] = useState<Record<string, { runs: number; reversed: boolean }>>({})
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const latest = useRef({ links, agents, activeTabId })
   latest.current = { links, agents, activeTabId }
@@ -123,9 +119,10 @@ export function LinkOverlay({
     const pending = timers.current
     const off = window.electronAPI.onHubMessageDelivered(evt => {
       const cur = latest.current
-      const key = linkKeyForMessage(evt, cur.links, cur.agents, cur.activeTabId)
-      if (!key) return
-      setFlights(f => ({ ...f, [key]: (f[key] ?? 0) + 1 }))
+      const hit = linkKeyForMessage(evt, cur.links, cur.agents, cur.activeTabId)
+      if (!hit) return
+      const { key, reversed } = hit
+      setFlights(f => ({ ...f, [key]: { runs: (f[key]?.runs ?? 0) + 1, reversed } }))
       const prev = pending.get(key)
       if (prev) clearTimeout(prev)
       pending.set(key, setTimeout(() => {
@@ -186,8 +183,9 @@ export function LinkOverlay({
         const pathD = buildOrthogonalPath(fromPos, toPos, allRects, i)
         const isHovered = hoveredLink === i
         const key = linkKey(link, agents)
-        const runs = key ? flights[key] : undefined
-        const inFlight = runs !== undefined
+        const flight = key ? flights[key] : undefined
+        const runs = flight?.runs
+        const inFlight = flight !== undefined
         const chipName = group?.name?.trim()
 
         // Midpoint for delete button (approximate — use average of from/to)
@@ -224,6 +222,7 @@ export function LinkOverlay({
               strokeWidth={isHovered ? 2.5 : 1.5}
               fill="none"
               opacity={isHovered ? 1 : 0.85}
+              className={inFlight && prefersReducedMotion() && !motionStore.get() ? 'link-flash' : undefined}
               strokeLinejoin="round"
               strokeLinecap="round"
               markerEnd={`url(#${markerId})`}
@@ -239,7 +238,7 @@ export function LinkOverlay({
               />
             ))}
             {/* Message in flight */}
-            {inFlight && !reduced && <MessageDash key={runs} d={pathD} />}
+            {inFlight && !reduced && <MessageDash key={runs} d={pathD} reversed={flight.reversed} />}
             {/* Group chip at the midpoint, only for named groups */}
             {chipName && !(isHovered && onRemoveLink) && (
               <g transform={`translate(${midX - chipW / 2} ${midY - CHIP_H / 2})`} style={{ pointerEvents: 'none' }}>

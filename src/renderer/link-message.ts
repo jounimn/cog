@@ -16,7 +16,7 @@ export function linkKey(link: LinkRef, agents: LinkAgent[]): string | null {
 
 /**
  * Which link (as a `fromId->toId` key) a delivered message travelled along,
- * in either link direction, or null when the pair is unlinked, off the active
+ * in either link direction (`reversed` when it went to->from), or null when the pair is unlinked, off the active
  * tab, addressed to the user, or names an unknown agent.
  */
 export function linkKeyForMessage(
@@ -24,7 +24,7 @@ export function linkKeyForMessage(
   links: LinkRef[],
   agents: LinkAgent[],
   activeTabId: string
-): string | null {
+): { key: string; reversed: boolean } | null {
   if (evt.tabId && evt.tabId !== activeTabId) return null
   const from = findAgent(evt.from, agents)
   const to = findAgent(evt.to, agents)
@@ -34,9 +34,8 @@ export function linkKeyForMessage(
     const a = findAgent(link.from, agents)
     const b = findAgent(link.to, agents)
     if (!a || !b) continue
-    if ((a.id === from.id && b.id === to.id) || (a.id === to.id && b.id === from.id)) {
-      return `${a.id}->${b.id}`
-    }
+    if (a.id === from.id && b.id === to.id) return { key: `${a.id}->${b.id}`, reversed: false }
+    if (a.id === to.id && b.id === from.id) return { key: `${a.id}->${b.id}`, reversed: true }
   }
   return null
 }

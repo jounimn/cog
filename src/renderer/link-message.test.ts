@@ -11,13 +11,13 @@ const links = [{ from: 'o', to: 'b' }, { from: 'o', to: 'f' }]
 
 describe('linkKeyForMessage', () => {
   it('returns the key for a message along a link', () => {
-    expect(linkKeyForMessage({ from: 'orchestrator', to: 'backend' }, links, agents, 't1')).toBe('o->b')
+    expect(linkKeyForMessage({ from: 'orchestrator', to: 'backend' }, links, agents, 't1')).toEqual({ key: 'o->b', reversed: false })
   })
-  it('returns the link key for a reverse-direction message', () => {
-    expect(linkKeyForMessage({ from: 'backend', to: 'orchestrator' }, links, agents, 't1')).toBe('o->b')
+  it('returns the link key, reversed, for a reverse-direction message', () => {
+    expect(linkKeyForMessage({ from: 'backend', to: 'orchestrator' }, links, agents, 't1')).toEqual({ key: 'o->b', reversed: true })
   })
   it('accepts ids and name-keyed links', () => {
-    expect(linkKeyForMessage({ from: 'o', to: 'b' }, [{ from: 'orchestrator', to: 'backend' }], agents, 't1')).toBe('o->b')
+    expect(linkKeyForMessage({ from: 'o', to: 'b' }, [{ from: 'orchestrator', to: 'backend' }], agents, 't1')).toEqual({ key: 'o->b', reversed: false })
   })
   it('returns null for an unlinked pair', () => {
     expect(linkKeyForMessage({ from: 'backend', to: 'qa' }, links, agents, 't1')).toBeNull()

@@ -148,6 +148,7 @@
 .cog-drawer__row .cog-drawer__label { margin-bottom: 0; }
 .cog-drawer .cog-seg { display: grid; grid-template-columns: 1fr; }
 .cog-drawer .cog-seg__item { display: block; width: 100%; min-width: 0; line-height: 24px; text-align: left; overflow: hidden; text-overflow: ellipsis; }
+.cog-drawer .cog-seg__item[aria-pressed="true"] { box-shadow: inset 2px 0 0 rgb(var(--steel)); font-weight: 600; }
 .cog-drawer .cog-select, .cog-drawer .cog-select select { width: 100%; }
 .cog-palettes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .cog-pcard {

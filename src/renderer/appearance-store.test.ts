@@ -55,4 +55,21 @@ describe('appearance store', () => {
     await expect(store.load()).resolves.toBeUndefined()
     expect(store.get().global).toEqual(DEFAULT_APPEARANCE)
   })
+
+  it('edits made before load() resolves are not persisted over stored data, then replay on top of it', async () => {
+    let release!: (v: Record<string, unknown>) => void
+    const api = {
+      getSettings: vi.fn(() => new Promise<Record<string, unknown>>(r => { release = r })),
+      setSetting: vi.fn(async () => undefined)
+    }
+    const store = createAppearanceStore(api)
+    const loading = store.load()
+    store.setGlobal({ palette: 'moss' })
+    expect(api.setSetting).not.toHaveBeenCalled()
+    release({ terminalAppearance: { global: { size: 15 }, perAgent: { a: { size: 12 } } } })
+    await loading
+    expect(store.get().global).toEqual({ ...DEFAULT_APPEARANCE, size: 15, palette: 'moss' })
+    expect(store.get().perAgent.a).toEqual({ size: 12 })
+    expect(api.setSetting).toHaveBeenCalledTimes(1)
+  })
 })

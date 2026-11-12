@@ -37,7 +37,7 @@ export function AgentPill({ agent, onClick, groupColor, onLinkDragStart, isLinkT
           cursor: 'pointer',
           fontSize: '12px',
           fontFamily: font.text,
-          transition: 'border-color 0.15s, background-color 0.15s',
+          transition: 'border-color var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out)',
         }}
       >
         <div style={{
@@ -61,7 +61,7 @@ export function AgentPill({ agent, onClick, groupColor, onLinkDragStart, isLinkT
             border: `2px solid ${c('line-strong')}`,
             cursor: 'crosshair',
             flexShrink: 0,
-            transition: 'transform 0.15s',
+            transition: 'transform var(--dur) var(--ease-out)',
           }}
           onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.4)')}
           onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
