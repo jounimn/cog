@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Button, Checkbox, Icon, Select } from '../ui'
 
 interface Props { projectName: string | null }
 
@@ -53,63 +54,45 @@ export function AutonomySettings({ projectName }: Props) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', borderTop: '1px solid #333', paddingTop: '16px' }}>
-      <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        Agent Autonomy{projectName ? ` — ${projectName}` : ''}
-      </div>
+    <div className="cog-autonomy">
+      <h3 className="cog-autonomy__title">
+        Agent autonomy{projectName ? <span className="cog-autonomy__project"> — {projectName}</span> : ''}
+      </h3>
       {!projectName ? (
-        <p style={{ fontSize: '12px', color: '#888', margin: 0 }}>Open a project to configure autonomy.</p>
+        <p className="cog-autonomy__empty">Open a project to configure autonomy.</p>
       ) : (
-        <div style={{
-          display: 'flex', flexDirection: 'column', gap: '10px', padding: '10px',
-          backgroundColor: active ? '#2a1f1f' : '#252525',
-          border: active ? '1px solid #b04a4a' : '1px solid #333',
-          borderRadius: '4px'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ fontSize: '13px', color: '#e0e0e0', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ color: active ? '#e8a33d' : '#888' }}>⚠</span> Autonomous session
-            </div>
-            <div
-              onClick={loaded ? (active ? end : start) : undefined}
-              style={{
-                width: 40, height: 22, borderRadius: 11,
-                backgroundColor: active ? '#4caf50' : '#444',
-                position: 'relative', cursor: loaded ? 'pointer' : 'not-allowed',
-                transition: 'background-color 0.2s', flexShrink: 0, opacity: loaded ? 1 : 0.5
-              }}
-            >
-              <div style={{
-                width: 18, height: 18, borderRadius: '50%', backgroundColor: '#fff',
-                position: 'absolute', top: 2, left: active ? 20 : 2, transition: 'left 0.2s'
-              }} />
-            </div>
+        <div className={active ? 'cog-autonomy__card cog-autonomy__card--active' : 'cog-autonomy__card'}>
+          <div className="cog-autonomy__head">
+            <span className={active ? 'cog-autonomy__warn cog-tone-warning' : 'cog-autonomy__warn'}>
+              <Icon name="triangle-alert" size={14} />
+            </span>
+            <Checkbox
+              checked={active}
+              disabled={!loaded}
+              onChange={() => { if (loaded) (active ? end : start)() }}
+            >Autonomous session</Checkbox>
           </div>
 
           {active ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ fontSize: '12px', color: '#e8a33d' }}>{formatRemaining(expiresAt! - now)} left</div>
-              <button
-                onClick={end}
-                style={{ fontSize: '11px', color: '#e0e0e0', background: '#3a2a2a', border: '1px solid #b04a4a', borderRadius: 4, padding: '3px 8px', cursor: 'pointer' }}
-              >End now</button>
+            <div className="cog-autonomy__row">
+              <span className="cog-autonomy__left cog-tone-warning">{formatRemaining(expiresAt! - now)} left</span>
+              <Button variant="ghost" className="cog-tone-danger" onClick={end}>End now</Button>
             </div>
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '12px', color: '#888' }}>Duration</span>
-              <select
-                value={durationHours}
-                onChange={e => setDurationHours(Number(e.target.value))}
-                style={{ fontSize: '12px', background: '#1c1c1c', color: '#e0e0e0', border: '1px solid #444', borderRadius: 4, padding: '3px 6px' }}
-              >
-                {DURATIONS.map(d => <option key={d.hours} value={d.hours}>{d.label}</option>)}
-              </select>
+            <div className="cog-autonomy__row cog-autonomy__row--start">
+              <span className="cog-autonomy__label">Duration</span>
+              <Select
+                value={String(durationHours)}
+                options={DURATIONS.map(d => ({ value: String(d.hours), label: d.label }))}
+                onChange={v => setDurationHours(Number(v))}
+                ariaLabel="Duration"
+              />
             </div>
           )}
 
-          <div style={{ fontSize: '11px', color: '#888', lineHeight: 1.4 }}>
+          <p className="cog-autonomy__note">
             While active, agents self-schedule prompts, spawn agents/teams, and close idle agents <strong>without approval</strong>. Every spawn/close posts to your inbox as urgent.
-          </div>
+          </p>
         </div>
       )}
     </div>
