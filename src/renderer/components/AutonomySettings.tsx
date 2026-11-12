@@ -56,7 +56,7 @@ export function AutonomySettings({ projectName }: Props) {
   return (
     <div className="cog-autonomy">
       <h3 className="cog-autonomy__title">
-        Agent autonomy{projectName ? <span className="cog-autonomy__project">{"00a0— "}{projectName}</span> : ''}
+        Agent autonomy{projectName ? <span className="cog-autonomy__project">{' — '}{projectName}</span> : ''}
       </h3>
       {!projectName ? (
         <p className="cog-autonomy__empty">Open a project to configure autonomy.</p>
